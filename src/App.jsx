@@ -901,7 +901,7 @@ function AppContent({ user, onSignOut }) {
                       <polyline points="2,28 10,20 18,22 26,12 34,16 46,4" stroke="rgba(232,184,75,0.2)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                       {[2,10,18,26,34,46].map((x,i)=><circle key={i} cx={x} cy={[28,20,22,12,16,4][i]} r="2.5" fill="rgba(232,184,75,0.2)"/>)}
                     </svg>
-                    <div style={{fontSize:10,letterSpacing:1,color:'rgba(245,240,232,0.3)',lineHeight:1.6}}>Chart will populate<br/>as you post rounds</div>
+                    <div style={{fontSize:10,letterSpacing:1,color:'rgba(245,240,232,0.3)',lineHeight:1.8,textAlign:'center'}}>Chart will populate once<br/>a handicap is established</div>
                   </div>
                 </div>
               )}
