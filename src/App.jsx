@@ -175,7 +175,7 @@ function calcHandicapDecimalAllTime(rounds) {
 
 function calcHandicap(rounds) {
   const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - 24);
+  cutoff.setMonth(cutoff.getMonth() - 18);
   const eligible = rounds.filter(r => new Date(r.date + 'T00:00:00') >= cutoff);
   if (eligible.length < 10) return null;
   const recent = eligible.slice(0, 12);
@@ -191,7 +191,7 @@ function calcHandicap(rounds) {
 
 function calcHandicapDecimal(rounds) {
   const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - 24);
+  cutoff.setMonth(cutoff.getMonth() - 18);
   const eligible = rounds.filter(r => new Date(r.date + 'T00:00:00') >= cutoff);
   if (eligible.length < 10) return null;
   const recent = eligible.slice(0, 12);
@@ -286,6 +286,7 @@ const globalStyles = `
 // ─── Auth Screen ───────────────────────────────────────────────────────────────
 function AuthScreen({ onAuth }) {
   const [mode, setMode] = useState('landing');
+  const [pendingUser, setPendingUser] = useState(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -346,7 +347,9 @@ function AuthScreen({ onAuth }) {
         body: JSON.stringify({ id: data.user.id, name: name.trim(), member_number: memberNumber }),
       });
       if (!profRes.ok) { const e = await profRes.json(); setLoading(false); return setError(e.message || "Failed to create profile."); }
-      onAuth({ id: data.user.id, name: name.trim(), email: data.user.email, memberNumber, createdAt: new Date().toISOString() });
+      const newUser = { id: data.user.id, name: name.trim(), email: data.user.email, memberNumber, createdAt: new Date().toISOString() };
+      setPendingUser(newUser);
+      setMode('onboarding');
     } catch (e) { setError("Network error. Please try again."); }
     setLoading(false);
   };
@@ -434,6 +437,40 @@ function AuthScreen({ onAuth }) {
           <span className="auth-link" style={{fontSize:11,color:'#e8b84b',cursor:'pointer',letterSpacing:1,textDecoration:'underline'}} onClick={()=>{setMode('forgot');setError('');setMessage('');}}>Forgot password?</span>
         </div>
         <div style={{...S.switchText,marginTop:8}}>Don't have an account? <span className="auth-link" style={{color:'#e8b84b',cursor:'pointer',textDecoration:'underline'}} onClick={()=>{setMode('signup');setError('');}}>Sign up</span></div>
+      </div>
+    </div>
+  );
+
+  if (mode === 'onboarding') return (
+    <div style={S.wrap}>
+      <style>{globalStyles}</style>
+      <div style={{flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'40px 28px'}}>
+        <div style={{marginBottom:36, textAlign:'center'}}>
+          <div style={{fontSize:24, fontWeight:800, color:'#fff', textTransform:'uppercase', letterSpacing:3, marginBottom:4}}>The Modern Index</div>
+          <div style={{fontSize:9, fontWeight:500, letterSpacing:3, textTransform:'uppercase', color:'#e02247'}}>A More Honest Golf Handicap</div>
+        </div>
+        <div style={{height:1, background:'rgba(201,168,76,0.25)', marginBottom:36}}/>
+        <div style={{display:'flex', flexDirection:'column', gap:22}}>
+          <p style={{margin:0, fontSize:18, color:'#e8b84b', lineHeight:1.75, fontWeight:700, textAlign:'center'}}>
+            WELCOME!
+          </p>
+          <p style={{margin:0, fontSize:15, color:'rgba(245,240,232,0.75)', lineHeight:1.75, fontWeight:400}}>
+            Thank you for becoming a member. From here on out you will have a handicap that truly represents you as a golfer.
+          </p>
+          <p style={{margin:0, fontSize:15, color:'rgba(245,240,232,0.75)', lineHeight:1.75, fontWeight:400}}>
+            <span style={{color:'#e8b84b', fontWeight:700}}>Note:</span> As a first time user, please feel free to input as many prior rounds as you'd like — up to 18 months back — in order to generate your new handicap as soon as possible.
+          </p>
+          <p style={{margin:0, fontSize:15, color:'#e8b84b', lineHeight:1.75, fontWeight:700}}>
+            Enjoy!
+          </p>
+        </div>
+        <div style={{height:1, background:'rgba(201,168,76,0.25)', margin:'36px 0 28px'}}/>
+        <button
+          className="auth-btn-primary"
+          style={{width:'100%', padding:16, background:'linear-gradient(135deg,#e8b84b,#c49a30)', border:'none', borderRadius:3, color:'#0d1b2e', fontSize:13, fontWeight:900, letterSpacing:4, textTransform:'uppercase', cursor:'pointer'}}
+          onClick={()=>onAuth(pendingUser)}>
+          Get Started
+        </button>
       </div>
     </div>
   );
