@@ -1,134 +1,9 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 const SUPABASE_URL = "https://euwqnyzzrxrmldmfspjr.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1d3FueXp6cnhybWxkbWZzcGpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1MzAwODMsImV4cCI6MjA5MDEwNjA4M30.4PWVQFOIx3yX7oMWvpO06_dqdrGLk0PGE77DstmpJO0";
 
-// Lightweight Supabase REST + Auth client (no npm dependency)
-const supabase = (() => {
-  let _session = null;
 
-  const headers = (extra = {}) => ({
-    "Content-Type": "application/json",
-    "apikey": SUPABASE_ANON_KEY,
-    "Authorization": `Bearer ${_session?.access_token || SUPABASE_ANON_KEY}`,
-    ...extra,
-  });
-
-  const auth = {
-    getSession: async () => {
-      try {
-        const raw = localStorage.getItem("sb-session");
-        if (raw) {
-          const s = JSON.parse(raw);
-          if (s?.expires_at && Date.now() / 1000 < s.expires_at) {
-            _session = s;
-            return { data: { session: s } };
-          }
-        }
-      } catch {}
-      return { data: { session: null } };
-    },
-    signUp: async ({ email, password }) => {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json();
-      if (data.error || (!data.user && !data.id)) return { data: null, error: { message: data.error_description || data.msg || "Sign up failed" } };
-      const user = data.user || data;
-      _session = { access_token: data.access_token, user, expires_at: data.expires_at };
-      localStorage.setItem("sb-session", JSON.stringify(_session));
-      return { data: { user }, error: null };
-    },
-    signInWithPassword: async ({ email, password }) => {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json();
-      if (data.error || !data.access_token) return { data: null, error: { message: data.error_description || "Invalid email or password" } };
-      _session = { access_token: data.access_token, user: data.user, expires_at: data.expires_at };
-      localStorage.setItem("sb-session", JSON.stringify(_session));
-      return { data: { user: data.user, session: _session }, error: null };
-    },
-    signOut: async () => {
-      await fetch(`${SUPABASE_URL}/auth/v1/logout`, { method: "POST", headers: headers() });
-      _session = null;
-      localStorage.removeItem("sb-session");
-      return { error: null };
-    },
-    resetPasswordForEmail: async (email) => {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json();
-      if (data.error) return { error: { message: data.error_description || "Reset failed" } };
-      return { error: null };
-    },
-    onAuthStateChange: (cb) => ({ data: { subscription: { unsubscribe: () => {} } } }),
-  };
-
-  const from = (table) => ({
-    select: (cols = "*") => ({
-      eq: (col, val) => ({
-        single: async () => {
-          const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${col}=eq.${val}&select=${cols}`, { headers: { ...headers(), "Accept": "application/vnd.pgrst.object+json" } });
-          const data = await res.json();
-          return { data: res.ok ? data : null, error: res.ok ? null : data };
-        },
-        order: (orderCol, { ascending = true } = {}) => ({
-          then: async (resolve) => {
-            const dir = ascending ? "asc" : "desc";
-            const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${col}=eq.${val}&select=${cols}&order=${orderCol}.${dir}`, { headers: headers() });
-            const data = await res.json();
-            resolve({ data: res.ok ? data : [], error: res.ok ? null : data });
-          }
-        }),
-      }),
-      order: (orderCol, { ascending = true } = {}) => ({
-        eq: (col, val) => new Promise(async (resolve) => {
-          const dir = ascending ? "asc" : "desc";
-          const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${col}=eq.${val}&select=${cols}&order=${orderCol}.${dir}`, { headers: headers() });
-          const data = await res.json();
-          resolve({ data: res.ok ? data : [], error: res.ok ? null : data });
-        }),
-      }),
-    }),
-    insert: (row) => ({
-      select: () => ({
-        single: async () => {
-          const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-            method: "POST",
-            headers: { ...headers(), "Prefer": "return=representation" },
-            body: JSON.stringify(row),
-          });
-          const data = await res.json();
-          return { data: res.ok ? (Array.isArray(data) ? data[0] : data) : null, error: res.ok ? null : data };
-        }
-      }),
-      then: async (resolve) => {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-          method: "POST",
-          headers: { ...headers(), "Prefer": "return=representation" },
-          body: JSON.stringify(row),
-        });
-        const data = await res.json();
-        resolve({ data: res.ok ? data : null, error: res.ok ? null : data });
-      }
-    }),
-    delete: () => ({
-      eq: (col, val) => ({
-        eq: (col2, val2) => fetch(`${SUPABASE_URL}/rest/v1/${table}?${col}=eq.${val}&${col2}=eq.${val2}`, { method: "DELETE", headers: headers() }).then(() => ({ error: null })),
-      }),
-    }),
-  });
-
-  return { auth, from };
-})();
 
 // ─── Handicap Logic ────────────────────────────────────────────────────────────
 function calcDifferential(score, rating, slope, currentHandicap) {
@@ -217,46 +92,7 @@ function localDateStr() {
 }
 
 // ─── Courses ───────────────────────────────────────────────────────────────────
-const COURSES = [
-  { name: "Pebble Beach Golf Links", location: "Pebble Beach, CA", tees: [{name:"Black",rating:75.5,slope:145},{name:"Blue",rating:73.8,slope:139},{name:"White",rating:71.5,slope:132},{name:"Gold",rating:69.2,slope:124},{name:"Red",rating:70.8,slope:128}] },
-  { name: "Augusta National Golf Club", location: "Augusta, GA", tees: [{name:"Black",rating:76.2,slope:137},{name:"Blue",rating:74.5,slope:131},{name:"White",rating:72.1,slope:125},{name:"Gold",rating:69.8,slope:118},{name:"Red",rating:71.2,slope:122}] },
-  { name: "Pinehurst No. 2", location: "Pinehurst, NC", tees: [{name:"Black",rating:76.1,slope:153},{name:"Blue",rating:74.2,slope:146},{name:"White",rating:71.8,slope:138},{name:"Gold",rating:69.5,slope:130},{name:"Red",rating:70.9,slope:134}] },
-  { name: "Bethpage Black", location: "Farmingdale, NY", tees: [{name:"Black",rating:75.4,slope:148},{name:"Blue",rating:73.1,slope:140},{name:"White",rating:70.8,slope:132},{name:"Gold",rating:68.4,slope:124},{name:"Red",rating:69.7,slope:128}] },
-  { name: "Torrey Pines South", location: "La Jolla, CA", tees: [{name:"Black",rating:75.9,slope:145},{name:"Blue",rating:73.6,slope:138},{name:"White",rating:71.2,slope:130},{name:"Gold",rating:68.9,slope:123},{name:"Red",rating:70.3,slope:127}] },
-  { name: "Whistling Straits", location: "Haven, WI", tees: [{name:"Black",rating:76.6,slope:151},{name:"Blue",rating:74.3,slope:143},{name:"White",rating:72.0,slope:135},{name:"Gold",rating:69.6,slope:127},{name:"Red",rating:71.1,slope:131}] },
-  { name: "Oakmont Country Club", location: "Oakmont, PA", tees: [{name:"Black",rating:77.0,slope:155},{name:"Blue",rating:74.8,slope:147},{name:"White",rating:72.3,slope:139},{name:"Gold",rating:70.0,slope:131},{name:"Red",rating:71.4,slope:135}] },
-  { name: "Winged Foot West", location: "Mamaroneck, NY", tees: [{name:"Black",rating:75.8,slope:144},{name:"Blue",rating:73.5,slope:137},{name:"White",rating:71.1,slope:129},{name:"Gold",rating:68.8,slope:122},{name:"Red",rating:70.2,slope:126}] },
-  { name: "Shinnecock Hills", location: "Southampton, NY", tees: [{name:"Black",rating:74.9,slope:140},{name:"Blue",rating:72.7,slope:133},{name:"White",rating:70.4,slope:126},{name:"Gold",rating:68.1,slope:119},{name:"Red",rating:69.5,slope:123}] },
-  { name: "TPC Sawgrass (Stadium)", location: "Ponte Vedra Beach, FL", tees: [{name:"Black",rating:75.8,slope:145},{name:"Blue",rating:73.4,slope:137},{name:"White",rating:71.0,slope:129},{name:"Gold",rating:68.7,slope:122},{name:"Red",rating:70.1,slope:126}] },
-  { name: "TPC Scottsdale Stadium Course", location: "Scottsdale, AZ", tees: [{name:"Black",rating:73.4,slope:136},{name:"Blue",rating:71.2,slope:129},{name:"White",rating:68.9,slope:122},{name:"Gold",rating:66.5,slope:115},{name:"Red",rating:67.8,slope:118}] },
-  { name: "Troon North Monument", location: "Scottsdale, AZ", tees: [{name:"Black",rating:73.8,slope:140},{name:"Blue",rating:71.5,slope:133},{name:"White",rating:69.2,slope:126},{name:"Gold",rating:66.9,slope:119},{name:"Red",rating:68.1,slope:122}] },
-  { name: "Desert Mountain Cochise", location: "Scottsdale, AZ", tees: [{name:"Black",rating:73.2,slope:135},{name:"Blue",rating:71.0,slope:128},{name:"White",rating:68.7,slope:121},{name:"Gold",rating:66.3,slope:114},{name:"Red",rating:67.6,slope:117}] },
-  { name: "We-Ko-Pa Saguaro", location: "Fort McDowell, AZ", tees: [{name:"Black",rating:73.5,slope:138},{name:"Blue",rating:71.3,slope:131},{name:"White",rating:69.0,slope:124},{name:"Gold",rating:66.6,slope:117},{name:"Red",rating:67.9,slope:120}] },
-  { name: "Grayhawk Raptor", location: "Scottsdale, AZ", tees: [{name:"Black",rating:73.9,slope:142},{name:"Blue",rating:71.6,slope:135},{name:"White",rating:69.3,slope:128},{name:"Gold",rating:67.0,slope:121},{name:"Red",rating:68.2,slope:124}] },
-  { name: "Bay Hill Club & Lodge", location: "Orlando, FL", tees: [{name:"Black",rating:74.7,slope:142},{name:"Blue",rating:72.4,slope:135},{name:"White",rating:70.1,slope:128},{name:"Gold",rating:67.8,slope:121},{name:"Red",rating:69.1,slope:124}] },
-  { name: "Seminole Golf Club", location: "Juno Beach, FL", tees: [{name:"Black",rating:73.2,slope:136},{name:"Blue",rating:71.0,slope:129},{name:"White",rating:68.7,slope:122},{name:"Gold",rating:66.4,slope:115},{name:"Red",rating:67.7,slope:118}] },
-  { name: "Harbour Town Golf Links", location: "Hilton Head, SC", tees: [{name:"Black",rating:73.7,slope:136},{name:"Blue",rating:71.5,slope:129},{name:"White",rating:69.2,slope:122},{name:"Gold",rating:66.8,slope:115},{name:"Red",rating:68.0,slope:118}] },
-  { name: "Muirfield Village Golf Club", location: "Dublin, OH", tees: [{name:"Black",rating:76.3,slope:148},{name:"Blue",rating:74.0,slope:141},{name:"White",rating:71.7,slope:134},{name:"Gold",rating:69.3,slope:127},{name:"Red",rating:70.7,slope:130}] },
-  { name: "Quail Hollow Club", location: "Charlotte, NC", tees: [{name:"Black",rating:75.8,slope:145},{name:"Blue",rating:73.5,slope:138},{name:"White",rating:71.2,slope:131},{name:"Gold",rating:68.8,slope:124},{name:"Red",rating:70.2,slope:127}] },
-  { name: "East Lake Golf Club", location: "Atlanta, GA", tees: [{name:"Black",rating:74.9,slope:140},{name:"Blue",rating:72.6,slope:133},{name:"White",rating:70.3,slope:126},{name:"Gold",rating:68.0,slope:119},{name:"Red",rating:69.3,slope:122}] },
-  { name: "Bandon Dunes", location: "Bandon, OR", tees: [{name:"Black",rating:73.4,slope:130},{name:"Blue",rating:71.2,slope:124},{name:"White",rating:68.9,slope:117},{name:"Gold",rating:66.5,slope:111},{name:"Red",rating:67.8,slope:114}] },
-  { name: "Pacific Dunes", location: "Bandon, OR", tees: [{name:"Black",rating:74.1,slope:135},{name:"Blue",rating:71.8,slope:128},{name:"White",rating:69.5,slope:122},{name:"Gold",rating:67.2,slope:115},{name:"Red",rating:68.4,slope:118}] },
-  { name: "Shadow Creek", location: "North Las Vegas, NV", tees: [{name:"Black",rating:74.6,slope:140},{name:"Blue",rating:72.3,slope:133},{name:"White",rating:70.0,slope:126},{name:"Gold",rating:67.7,slope:119},{name:"Red",rating:69.0,slope:122}] },
-  { name: "Streamsong Red", location: "Streamsong, FL", tees: [{name:"Black",rating:74.3,slope:138},{name:"Blue",rating:72.1,slope:131},{name:"White",rating:69.8,slope:124},{name:"Gold",rating:67.4,slope:117},{name:"Red",rating:68.7,slope:120}] },
-  { name: "Valhalla Golf Club", location: "Louisville, KY", tees: [{name:"Black",rating:75.8,slope:146},{name:"Blue",rating:73.5,slope:139},{name:"White",rating:71.2,slope:132},{name:"Gold",rating:68.9,slope:125},{name:"Red",rating:70.2,slope:128}] },
-  { name: "Kiawah Island Ocean Course", location: "Kiawah Island, SC", tees: [{name:"Black",rating:77.0,slope:152},{name:"Blue",rating:74.7,slope:145},{name:"White",rating:72.4,slope:138},{name:"Gold",rating:70.1,slope:131},{name:"Red",rating:71.4,slope:134}] },
-  { name: "Medinah Country Club No. 3", location: "Medinah, IL", tees: [{name:"Black",rating:76.5,slope:149},{name:"Blue",rating:74.2,slope:142},{name:"White",rating:71.9,slope:135},{name:"Gold",rating:69.6,slope:128},{name:"Red",rating:70.9,slope:131}] },
-  { name: "Baltusrol Golf Club Lower", location: "Springfield, NJ", tees: [{name:"Black",rating:75.8,slope:143},{name:"Blue",rating:73.5,slope:136},{name:"White",rating:71.2,slope:129},{name:"Gold",rating:68.9,slope:122},{name:"Red",rating:70.2,slope:125}] },
-  { name: "Riviera Country Club", location: "Pacific Palisades, CA", tees: [{name:"Black",rating:75.7,slope:143},{name:"Blue",rating:73.4,slope:136},{name:"White",rating:71.1,slope:129},{name:"Gold",rating:68.8,slope:122},{name:"Red",rating:70.1,slope:125}] },
-  { name: "Colonial Country Club", location: "Fort Worth, TX", tees: [{name:"Black",rating:73.9,slope:135},{name:"Blue",rating:71.7,slope:128},{name:"White",rating:69.4,slope:121},{name:"Gold",rating:67.0,slope:114},{name:"Red",rating:68.3,slope:117}] },
-  { name: "Southern Hills Country Club", location: "Tulsa, OK", tees: [{name:"Black",rating:75.5,slope:145},{name:"Blue",rating:73.2,slope:138},{name:"White",rating:70.9,slope:131},{name:"Gold",rating:68.6,slope:124},{name:"Red",rating:69.9,slope:127}] },
-  { name: "Hazeltine National Golf Club", location: "Chaska, MN", tees: [{name:"Black",rating:75.1,slope:143},{name:"Blue",rating:72.8,slope:136},{name:"White",rating:70.5,slope:129},{name:"Gold",rating:68.2,slope:122},{name:"Red",rating:69.5,slope:125}] },
-  { name: "Caves Valley Golf Club", location: "Owings Mills, MD", tees: [{name:"Black",rating:75.6,slope:144},{name:"Blue",rating:73.3,slope:137},{name:"White",rating:71.0,slope:130},{name:"Gold",rating:68.7,slope:123},{name:"Red",rating:70.0,slope:126}] },
-  { name: "Spyglass Hill Golf Course", location: "Pebble Beach, CA", tees: [{name:"Black",rating:75.3,slope:148},{name:"Blue",rating:73.0,slope:141},{name:"White",rating:70.7,slope:134},{name:"Gold",rating:68.4,slope:127},{name:"Red",rating:69.7,slope:130}] },
-  { name: "Arcadia Bluffs South", location: "Arcadia, MI", tees: [{name:"Black",rating:74.8,slope:141},{name:"Blue",rating:72.5,slope:134},{name:"White",rating:70.2,slope:127},{name:"Gold",rating:67.9,slope:120},{name:"Red",rating:69.2,slope:123}] },
-  { name: "Sand Hills Golf Club", location: "Mullen, NE", tees: [{name:"Black",rating:73.1,slope:138},{name:"Blue",rating:70.9,slope:131},{name:"White",rating:68.6,slope:124},{name:"Gold",rating:66.2,slope:117},{name:"Red",rating:67.5,slope:120}] },
-  { name: "Prairie Dunes Country Club", location: "Hutchinson, KS", tees: [{name:"Black",rating:71.5,slope:130},{name:"Blue",rating:69.3,slope:124},{name:"White",rating:67.0,slope:117},{name:"Gold",rating:64.7,slope:110},{name:"Red",rating:65.9,slope:113}] },
-];
+const COURSES = []; // courses now loaded from Supabase
 
 // ─── Global Styles ─────────────────────────────────────────────────────────────
 const globalStyles = `
@@ -283,18 +119,40 @@ const globalStyles = `
   .avatar-wrap:hover .avatar-tooltip{visibility:visible;opacity:1;}
 `;
 
+// ─── Member Number Input ───────────────────────────────────────────────────────
+function MemberNumberInput({ value, onChange, inputStyle }) {
+  const handleChange = (e) => {
+    const raw = e.target.value.replace(/[^0-9]/g, '').slice(0, 8);
+    const formatted = raw.length > 4 ? raw.slice(0, 4) + '-' + raw.slice(4) : raw;
+    onChange(formatted);
+  };
+
+  return (
+    <input
+      style={{...inputStyle, letterSpacing:4, fontSize:15}}
+      placeholder=""
+      value={value}
+      onChange={handleChange}
+      maxLength={9}
+      inputMode="numeric"
+    />
+  );
+}
+
 // ─── Auth Screen ───────────────────────────────────────────────────────────────
 function AuthScreen({ onAuth }) {
   const [mode, setMode] = useState('landing');
-  const [pendingUser, setPendingUser] = useState(null);
   const [name, setName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
+  const [memberNumber, setMemberNumber] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [resetEmail, setResetEmail] = useState('');
+  const [pendingUser, setPendingUser] = useState(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
 
   const S = {
     wrap: { maxWidth:430, margin:'0 auto', minHeight:'100vh', background:'#0d1b2e', color:'#f5f0e8', display:'flex', flexDirection:'column' },
@@ -314,6 +172,8 @@ function AuthScreen({ onAuth }) {
     back: { background:'none', border:'none', color:'rgba(201,168,76,0.5)', fontSize:11, letterSpacing:2, textTransform:'uppercase', cursor:'pointer', marginBottom:22, padding:0 },
   };
 
+  const anonHeaders = { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY };
+
   const Header = () => (
     <div style={S.top}>
       <div style={S.title}>The Modern Index</div>
@@ -322,14 +182,13 @@ function AuthScreen({ onAuth }) {
     </div>
   );
 
-  const anonHeaders = { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY };
-
   const handleSignUp = async () => {
     setError(''); setMessage('');
-    if (!name.trim()) return setError('Please enter your name.');
-    if (!email.trim() || !email.includes('@')) return setError('Please enter a valid email.');
-    if (password.length < 6) return setError('Password must be at least 6 characters.');
-    if (password !== confirmPassword) return setError('Passwords do not match.');
+    if (!name.trim()) return setError('Please enter your first name');
+    if (!lastName.trim()) return setError('Please enter your last name');
+    if (!email.trim() || !email.includes('@')) return setError('Please enter a valid email');
+    if (password.length < 6) return setError('Password must be at least 6 characters');
+    if (password !== confirmPassword) return setError('Passwords do not match');
     setLoading(true);
     try {
       const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
@@ -337,57 +196,101 @@ function AuthScreen({ onAuth }) {
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
       const data = await res.json();
-      if (!res.ok || !data.user) { setLoading(false); return setError(data.error_description || data.msg || "Sign up failed. Please try again."); }
-      const session = { access_token: data.access_token, expires_at: data.expires_at, user: data.user };
+      if (!res.ok || !data.user) { setLoading(false); return setError(data.error_description || data.msg || "Sign up failed — please try again"); }
+      const session = { access_token: data.access_token, refresh_token: data.refresh_token, expires_at: data.expires_at, user: data.user };
       localStorage.setItem("sb-session", JSON.stringify(session));
-      const memberNumber = generateMemberNumber();
+      const newMemberNumber = generateMemberNumber();
       const authHeader = { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${data.access_token}`, "Prefer": "return=representation" };
       const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
         method: "POST", headers: authHeader,
-        body: JSON.stringify({ id: data.user.id, name: name.trim(), member_number: memberNumber }),
+        body: JSON.stringify({ id: data.user.id, name: name.trim(), last_name: lastName.trim(), member_number: newMemberNumber, email: email.trim().toLowerCase() }),
       });
-      if (!profRes.ok) { const e = await profRes.json(); setLoading(false); return setError(e.message || "Failed to create profile."); }
-      const newUser = { id: data.user.id, name: name.trim(), email: data.user.email, memberNumber, createdAt: new Date().toISOString() };
+      if (!profRes.ok) { const e = await profRes.json(); setLoading(false); return setError(e.message || "Failed to create profile"); }
+      const newUser = { id: data.user.id, name: name.trim(), lastName: lastName.trim(), email: data.user.email, memberNumber: newMemberNumber, createdAt: new Date().toISOString() };
       setPendingUser(newUser);
       setMode('onboarding');
-    } catch (e) { setError("Network error. Please try again."); }
+    } catch (e) { setError("Network error — please try again"); }
     setLoading(false);
   };
 
   const handleLogin = async () => {
     setError(''); setMessage('');
-    if (!email.trim() || !password) return setError('Please enter your email and password.');
+    if (!memberNumber.trim() || !password) return setError('Please enter your member # and password');
     setLoading(true);
     try {
+      // Look up email by member number
+      const lookupRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?member_number=eq.${memberNumber.trim()}&select=id,name,member_number,created_at`, {
+        headers: { ...anonHeaders, "Accept": "application/vnd.pgrst.object+json" }
+      });
+      if (!lookupRes.ok) { setLoading(false); return setError('Member # not found'); }
+      const profile = await lookupRes.json();
+      if (!profile?.id) { setLoading(false); return setError('Member # not found'); }
+      // Get email from auth.users via a profile lookup — we need to sign in differently
+      // Use member_number to find the user's email stored in profiles
+      const emailLookupRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?member_number=eq.${memberNumber.trim()}&select=id`, {
+        headers: anonHeaders
+      });
+      const emailData = await emailLookupRes.json();
+      if (!emailData?.length) { setLoading(false); return setError('Member # not found'); }
+      const userId = emailData[0].id;
+      // We need the email — store it in profiles table
+      // For now use the stored email in profiles
+      const fullProfileRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`, {
+        headers: { ...anonHeaders, "Accept": "application/vnd.pgrst.object+json" }
+      });
+      const fullProfile = await fullProfileRes.json();
+      if (!fullProfile?.email) { setLoading(false); return setError('Could not find account — please try again'); }
+      // Now authenticate with email
       const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         method: "POST", headers: anonHeaders,
-        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+        body: JSON.stringify({ email: fullProfile.email, password }),
       });
       const data = await res.json();
-      if (!res.ok || !data.access_token) { setLoading(false); return setError(data.error_description || "Invalid email or password."); }
-      const session = { access_token: data.access_token, expires_at: data.expires_at, user: data.user };
+      if (!res.ok || !data.access_token) { setLoading(false); return setError('Incorrect password'); }
+      const session = { access_token: data.access_token, refresh_token: data.refresh_token, expires_at: data.expires_at, user: data.user };
       localStorage.setItem("sb-session", JSON.stringify(session));
-      const authHeader = { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${data.access_token}`, "Accept": "application/vnd.pgrst.object+json" };
-      const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${data.user.id}&select=*`, { headers: authHeader });
-      const profile = await profRes.json();
-      if (!profRes.ok || !profile?.name) { setLoading(false); return setError("Could not load profile."); }
-      onAuth({ id: data.user.id, name: profile.name, email: data.user.email, memberNumber: profile.member_number, createdAt: profile.created_at });
-    } catch (e) { setError("Network error. Please try again."); }
+      onAuth({ id: data.user.id, name: fullProfile.name, lastName: fullProfile.last_name || '', email: fullProfile.email, memberNumber: fullProfile.member_number, createdAt: fullProfile.created_at });
+    } catch (e) { setError("Network error — please try again"); }
     setLoading(false);
   };
 
   const handleForgotPassword = async () => {
     setError(''); setMessage('');
-    if (!resetEmail.trim() || !resetEmail.includes('@')) return setError('Please enter a valid email.');
+    if (!resetEmail.trim() || !resetEmail.includes('@')) return setError('Please enter a valid email');
     setLoading(true);
     try {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
+      const resetRes = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
         method: "POST", headers: anonHeaders,
         body: JSON.stringify({ email: resetEmail.trim().toLowerCase() }),
       });
-      if (!res.ok) { const e = await res.json(); setLoading(false); return setError(e.error_description || "Reset failed."); }
-      setMessage('Password reset email sent. Check your inbox.');
-    } catch (e) { setError("Network error. Please try again."); }
+      if (!resetRes.ok) { const e = await resetRes.json(); setLoading(false); return setError(e.error_description || "Reset failed"); }
+      setMessage('Password reset email sent');
+    } catch (e) { setError("Network error — please try again"); }
+    setLoading(false);
+  };
+
+  const handleForgotMemberNumber = async () => {
+    setError(''); setMessage('');
+    if (!email.trim() || !email.includes('@')) return setError('Please enter a valid email');
+    setLoading(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?email=eq.${email.trim().toLowerCase()}&select=member_number,name`, {
+        headers: { ...anonHeaders, "Accept": "application/vnd.pgrst.object+json" }
+      });
+      const profile = await res.json();
+      if (!res.ok || !profile?.member_number) { setLoading(false); return setError('No account found with that email'); }
+      // Send member number via Resend edge function
+      const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-contact-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+        body: JSON.stringify({
+          name: profile.name,
+          email: email.trim().toLowerCase(),
+          message: `Your Modern Index member number is: ${profile.member_number}`,
+        }),
+      });
+      setMessage('Your member # has been sent to that email address');
+    } catch (e) { setError("Network error — please try again"); }
     setLoading(false);
   };
 
@@ -412,13 +315,16 @@ function AuthScreen({ onAuth }) {
       <Header />
       <div style={{...S.body, paddingTop:24}}>
         <button style={{...S.back, marginBottom:22}} onClick={()=>{setMode('landing');setError('');}}>← Back</button>
-        <div style={S.field}><label style={S.label}>Full Name</label><input style={S.input} placeholder="Your name" value={name} onChange={e=>setName(e.target.value)} /></div>
-        <div style={S.field}><label style={S.label}>Email</label><input style={S.input} placeholder="you@email.com" type="email" value={email} onChange={e=>setEmail(e.target.value)} /></div>
-        <div style={S.field}><label style={S.label}>Password</label><input style={S.input} placeholder="Min. 6 characters" type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
+          <div><label style={S.label}>First Name</label><input style={S.input} placeholder="" value={name} onChange={e=>setName(e.target.value)} /></div>
+          <div><label style={S.label}>Last Name</label><input style={S.input} placeholder="" value={lastName} onChange={e=>setLastName(e.target.value)} /></div>
+        </div>
+        <div style={S.field}><label style={S.label}>Email</label><input style={S.input} placeholder="" type="email" value={email} onChange={e=>setEmail(e.target.value)} /></div>
+        <div style={S.field}><label style={S.label}>Create Password</label><input style={S.input} placeholder="Min. 6 characters" type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>
         <div style={S.field}><label style={S.label}>Confirm Password</label><input style={S.input} placeholder="Re-enter password" type="password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} /></div>
         {error && <div style={S.error}>{error}</div>}
         <button className="auth-btn-primary" style={{...S.btnPrimary, opacity:loading?0.5:1}} onClick={handleSignUp} disabled={loading}>{loading?'Creating Account...':'Create Account'}</button>
-        <div style={S.switchText}>Already have an account? <span className="auth-link" style={{color:'#e8b84b',cursor:'pointer',textDecoration:'underline'}} onClick={()=>{setMode('login');setError('');}}>Log in</span></div>
+        <div style={S.switchText}>Already have an account? <span className="auth-link" style={{color:'#e8b84b',cursor:'pointer',textDecoration:'underline'}} onClick={()=>{setMode('login');setError('');}}>Log In</span></div>
       </div>
     </div>
   );
@@ -429,14 +335,19 @@ function AuthScreen({ onAuth }) {
       <Header />
       <div style={{...S.body, paddingTop:24}}>
         <button style={{...S.back, marginBottom:22}} onClick={()=>{setMode('landing');setError('');}}>← Back</button>
-        <div style={S.field}><label style={S.label}>Email</label><input style={S.input} placeholder="you@email.com" type="email" value={email} onChange={e=>setEmail(e.target.value)} /></div>
-        <div style={S.field}><label style={S.label}>Password</label><input style={S.input} placeholder="Your password" type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()} /></div>
+        <div style={S.field}>
+          <label style={S.label}>Member #</label>
+          <MemberNumberInput value={memberNumber} onChange={setMemberNumber} inputStyle={S.input} />
+        </div>
+        <div style={S.field}><label style={S.label}>Password</label><input style={S.input} placeholder="" type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()} /></div>
         {error && <div style={S.error}>{error}</div>}
         <button className="auth-btn-primary" style={{...S.btnPrimary, opacity:loading?0.5:1}} onClick={handleLogin} disabled={loading}>{loading?'Logging In...':'Log In'}</button>
-        <div style={{textAlign:'center',marginTop:14}}>
-          <span className="auth-link" style={{fontSize:11,color:'#e8b84b',cursor:'pointer',letterSpacing:1,textDecoration:'underline'}} onClick={()=>{setMode('forgot');setError('');setMessage('');}}>Forgot password?</span>
+        <div style={{textAlign:'center',marginTop:14,display:'flex',justifyContent:'center',gap:16}}>
+          <span className="auth-link" style={{fontSize:11,color:'#e8b84b',cursor:'pointer',letterSpacing:1,textDecoration:'underline'}} onClick={()=>{setMode('forgotMember');setError('');setMessage('');}}>Forgot Member #</span>
+          <span style={{fontSize:11,color:'rgba(245,240,232,0.2)'}}>|</span>
+          <span className="auth-link" style={{fontSize:11,color:'#e8b84b',cursor:'pointer',letterSpacing:1,textDecoration:'underline'}} onClick={()=>{setMode('forgot');setError('');setMessage('');}}>Forgot Password</span>
         </div>
-        <div style={{...S.switchText,marginTop:8}}>Don't have an account? <span className="auth-link" style={{color:'#e8b84b',cursor:'pointer',textDecoration:'underline'}} onClick={()=>{setMode('signup');setError('');}}>Sign up</span></div>
+        <div style={{...S.switchText,marginTop:8}}>Don't have an account? <span className="auth-link" style={{color:'#e8b84b',cursor:'pointer',textDecoration:'underline'}} onClick={()=>{setMode('signup');setError('');}}>Create one</span></div>
       </div>
     </div>
   );
@@ -451,24 +362,20 @@ function AuthScreen({ onAuth }) {
         </div>
         <div style={{height:1, background:'rgba(201,168,76,0.25)', marginBottom:36}}/>
         <div style={{display:'flex', flexDirection:'column', gap:22}}>
-          <p style={{margin:0, fontSize:18, color:'#e8b84b', lineHeight:1.75, fontWeight:700, textAlign:'center'}}>
-            WELCOME!
-          </p>
+          <p style={{margin:0, fontSize:18, color:'#e8b84b', lineHeight:1.75, fontWeight:700, textAlign:'center'}}>WELCOME!</p>
           <p style={{margin:0, fontSize:15, color:'rgba(245,240,232,0.75)', lineHeight:1.75, fontWeight:400}}>
-            Thank you for becoming a member. From here on out you will have a handicap that truly represents you as a golfer.
+            Thank you for becoming a member. Below you will find your member # — please save it, as it will be used to log in to your account
           </p>
+          <div style={{background:'#0d1b2e',border:'1px solid rgba(232,184,75,0.4)',borderRadius:4,padding:'18px 16px',textAlign:'center'}}>
+            <div style={{fontSize:28,fontWeight:900,color:'#e8b84b',letterSpacing:2}}>{pendingUser?.memberNumber}</div>
+          </div>
           <p style={{margin:0, fontSize:15, color:'rgba(245,240,232,0.75)', lineHeight:1.75, fontWeight:400}}>
-            <span style={{color:'#e8b84b', fontWeight:700}}>Note:</span> As a first time user, please feel free to input as many prior rounds as you'd like — up to 18 months back — in order to generate your new handicap as soon as possible.
+            <span style={{color:'#e8b84b', fontWeight:700}}>Note:</span> As a first time user, please feel free to input as many of your prior rounds as you'd like — up to 18 months back — in order to generate your new handicap as soon as possible
           </p>
-          <p style={{margin:0, fontSize:15, color:'#e8b84b', lineHeight:1.75, fontWeight:700}}>
-            Enjoy!
-          </p>
+
         </div>
         <div style={{height:1, background:'rgba(201,168,76,0.25)', margin:'36px 0 28px'}}/>
-        <button
-          className="auth-btn-primary"
-          style={{width:'100%', padding:16, background:'linear-gradient(135deg,#e8b84b,#c49a30)', border:'none', borderRadius:3, color:'#0d1b2e', fontSize:13, fontWeight:900, letterSpacing:4, textTransform:'uppercase', cursor:'pointer'}}
-          onClick={()=>onAuth(pendingUser)}>
+        <button className="auth-btn-primary" style={{width:'100%', padding:16, background:'linear-gradient(135deg,#e8b84b,#c49a30)', border:'none', borderRadius:3, color:'#0d1b2e', fontSize:13, fontWeight:900, letterSpacing:4, textTransform:'uppercase', cursor:'pointer'}} onClick={()=>onAuth(pendingUser)}>
           Get Started
         </button>
       </div>
@@ -480,19 +387,647 @@ function AuthScreen({ onAuth }) {
       <style>{globalStyles}</style>
       <Header />
       <div style={{...S.body, paddingTop:24}}>
-        <button style={{...S.back, marginBottom:22}} onClick={()=>{setMode('login');setError('');setMessage('');}}>← Back</button>
-        <div style={{fontSize:12,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#e8b84b',marginBottom:20,marginTop:16}}>Reset Password</div>
-        <div style={S.field}><label style={S.label}>Email</label><input style={S.input} placeholder="you@email.com" type="email" value={resetEmail} onChange={e=>setResetEmail(e.target.value)} /></div>
+        <button style={{...S.back, marginBottom:28}} onClick={()=>{setMode('login');setError('');setMessage('');}}>← Back</button>
+        <div style={{fontSize:14,color:'rgba(245,240,232,0.5)',marginBottom:20,lineHeight:1.6}}>An email with a password reset link will be sent to the address submitted below:</div>
+        <div style={S.field}><label style={S.label}>Email</label><input style={S.input} placeholder="" type="email" value={resetEmail} onChange={e=>setResetEmail(e.target.value)} /></div>
         {error && <div style={S.error}>{error}</div>}
         {message && <div style={S.success}>{message}</div>}
-        <button className="auth-btn-primary" style={{...S.btnPrimary, opacity:loading?0.5:1}} onClick={handleForgotPassword} disabled={loading}>{loading?'Sending...':'Send Reset Email'}</button>
+        <button className="auth-btn-primary" style={{...S.btnPrimary, opacity:loading?0.5:1}} onClick={handleForgotPassword} disabled={loading}>{loading?'Sending...':'Send Reset Link'}</button>
+      </div>
+    </div>
+  );
+
+  if (mode === 'forgotMember') return (
+    <div style={S.wrap}>
+      <style>{globalStyles}</style>
+      <Header />
+      <div style={{...S.body, paddingTop:24}}>
+        <button style={{...S.back, marginBottom:28}} onClick={()=>{setMode('login');setError('');setMessage('');}}>← Back</button>
+        <div style={{fontSize:14,color:'rgba(245,240,232,0.5)',marginBottom:20,lineHeight:1.6}}>An email with your Member # will be sent to the address submitted below:</div>
+        <div style={S.field}><label style={S.label}>Email</label><input style={S.input} placeholder="" type="email" value={email} onChange={e=>setEmail(e.target.value)} /></div>
+        {error && <div style={S.error}>{error}</div>}
+        {message && <div style={S.success}>{message}</div>}
+        <button className="auth-btn-primary" style={{...S.btnPrimary, opacity:loading?0.5:1}} onClick={handleForgotMemberNumber} disabled={loading}>{loading?'Sending...':'Send Member #'}</button>
       </div>
     </div>
   );
 }
 
+function displayName(name, lastN) {
+  if (!lastN) return name;
+  return `${name} ${lastN.trim()[0].toUpperCase()}`;
+}
+
+function PartnerRow({ p, prof, otherId, handicaps, onRemove, rowStyle }) {
+  const [hovered, setHovered] = useState(false);
+  const hcp = handicaps[otherId];
+  const hcpDisplay = hcp===undefined||hcp===null ? '—' : hcp<0 ? `+${Math.abs(hcp)}` : String(hcp);
+
+  return (
+    <div
+      style={{...rowStyle, position:'relative', alignItems:'center', padding:'14px'}}
+      onMouseEnter={()=>setHovered(true)}
+      onMouseLeave={()=>setHovered(false)}>
+      {hovered&&(
+        <button onClick={e=>{e.stopPropagation();onRemove();}} style={{position:'absolute',top:-7,right:-7,width:16,height:16,borderRadius:'50%',background:'#e02247',border:'2px solid #0d1b2e',color:'#fff',fontSize:10,cursor:'pointer',lineHeight:1,padding:0,fontWeight:900,display:'flex',alignItems:'center',justifyContent:'center',zIndex:10}}>✕</button>
+      )}
+      <div style={{flex:1}}>
+        <div style={{fontSize:13,color:'#f5f0e8',fontWeight:600}}>{prof ? displayName(prof.name, prof.last_name) : '...'}</div>
+        <div style={{fontSize:9,color:'rgba(201,168,76,0.6)',letterSpacing:1,marginTop:2}}>{prof?.member_number||''}</div>
+      </div>
+      <div style={{textAlign:'center',minWidth:56}}>
+        <div style={{fontSize:7,letterSpacing:2,textTransform:'uppercase',color:'rgba(201,168,76,0.5)',marginBottom:3}}>Current Handicap</div>
+        <div style={{fontSize:28,fontWeight:800,color:'#e8b84b',lineHeight:1,letterSpacing:-1}}>{hcpDisplay}</div>
+      </div>
+    </div>
+  );
+}
+
+function EntryRow({ entry }) {
+  const color = entry.trend === 'hot' ? '#84e040' : '#e02247';
+  const streak = entry.streak || 3;
+  return (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'9px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.13)',borderRadius:4,marginBottom:6}}>
+      <div style={{fontSize:13,color:'#f5f0e8',fontWeight:500}}>
+        {displayName(entry.name, entry.lastName)}
+        {entry.isUser && <span style={{fontSize:9,color:'rgba(201,168,76,0.5)',letterSpacing:1,marginLeft:6}}>YOU</span>}
+      </div>
+      <div style={{fontSize:22,fontWeight:800,color,lineHeight:1}}>{streak}</div>
+    </div>
+  );
+}
+
+// ─── Hot / Not Section ────────────────────────────────────────────────────────
+function calcStreak(rounds) {
+  // Returns { trend: 'hot'|'not'|'neutral', streak: number }
+  if (!rounds || rounds.length < 13) return { trend: 'neutral', streak: 0 };
+  const getHcp = (subset) => {
+    const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 18);
+    const eligible = subset.filter(r => new Date(r.date + 'T00:00:00') >= cutoff);
+    if (eligible.length < 10) return null;
+    const r12 = eligible.slice(0, 12);
+    const sorted = [...r12].sort((a,b) => a.differential - b.differential);
+    const middle = r12.length >= 12 ? sorted.slice(1,11) : sorted;
+    return Math.round((middle.reduce((s,r) => s + r.differential, 0) / middle.length) * 10) / 10;
+  };
+  // Build snapshots going back as far as possible
+  const snapshots = [];
+  for (let i = 0; i < rounds.length; i++) {
+    const h = getHcp(rounds.slice(i));
+    if (h !== null) snapshots.push(h); else break;
+  }
+  if (snapshots.length < 3) return { trend: 'neutral', streak: 0 };
+  // Count consecutive improvements from most recent
+  let hotStreak = 0, notStreak = 0;
+  for (let i = 0; i < snapshots.length - 1; i++) {
+    if (snapshots[i] < snapshots[i+1] - 0.09) hotStreak++;
+    else break;
+  }
+  for (let i = 0; i < snapshots.length - 1; i++) {
+    if (snapshots[i] > snapshots[i+1] + 0.09) notStreak++;
+    else break;
+  }
+  if (hotStreak >= 3) return { trend: 'hot', streak: hotStreak };
+  if (notStreak >= 3) return { trend: 'not', streak: notStreak };
+  return { trend: 'neutral', streak: 0 };
+}
+
+function HotNotSection({ user, partners, profiles, trends, handicaps, userRounds, streaks }) {
+  const userResult = calcStreak(userRounds || []);
+
+  const allEntries = [
+    { id: user.id, name: user.name, lastName: user.lastName, trend: userResult.trend, streak: userResult.streak, isUser: true },
+    ...partners.map(p => {
+      const otherId = p.requester_id === user.id ? p.recipient_id : p.requester_id;
+      const prof = profiles[otherId];
+      const s = streaks?.[otherId] || { trend: trends[otherId] || 'neutral', streak: 3 };
+      return { id: otherId, name: prof?.name || '...', lastName: prof?.last_name || '', trend: s.trend, streak: s.streak, isUser: false };
+    })
+  ];
+
+  const hot = allEntries.filter(e => e.trend === 'hot');
+  const not = allEntries.filter(e => e.trend === 'not');
+
+  const InfoIcon = ({ text }) => (
+    <span className="info-tooltip" onClick={e=>e.currentTarget.classList.toggle('active')} style={{marginLeft:4}}>
+      i<span className="tooltip-text" style={{right:'auto',left:'50%',transform:'translateX(-50%)',fontSize:9,letterSpacing:1,whiteSpace:'normal',width:160,textAlign:'center'}}>{text}</span>
+    </span>
+  );
+
+  return (
+    <div style={{marginTop:20}}>
+      <div style={{height:1,background:'rgba(201,168,76,0.12)',marginBottom:16}}/>
+      <div style={{marginBottom:24}}>
+        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10,paddingLeft:4}}>
+          <div style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#84e040'}}>Who's Hot</div>
+          <span style={{fontSize:14,lineHeight:1}}>🔥</span>
+          <InfoIcon text="Consecutive rounds of handicap improvement (min. 3)" />
+        </div>
+        {hot.length === 0
+          ? <div style={{fontSize:11,color:'rgba(245,240,232,0.2)',fontStyle:'italic',paddingLeft:4}}>Where is everybody?</div>
+          : hot.map(e => <EntryRow key={e.id} entry={e} />)
+        }
+      </div>
+      <div>
+        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10,paddingLeft:4}}>
+          <div style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#e02247'}}>Who's Not</div>
+          <span style={{fontSize:14,lineHeight:1}}>❄️</span>
+          <InfoIcon text="Consecutive rounds handicap has increased (min. 3)" />
+        </div>
+        {not.length === 0
+          ? <div style={{fontSize:11,color:'rgba(245,240,232,0.2)',fontStyle:'italic',paddingLeft:4}}>Nothing to see here...</div>
+          : not.map(e => <EntryRow key={e.id} entry={e} />)
+        }
+      </div>
+    </div>
+  );
+}
+
+// ─── Partners Panel ────────────────────────────────────────────────────────────
+function PartnersPanel({ user, partners, partnerRequests, sentRequests, trends, streaks, userRounds, partnerSearch, setPartnerSearch, searchResults, searchUsers, searchLoading, partnerLoading, sendRequest, respondToRequest, removePartner, fetchPartners, onBack, drawerAuthHeaders, SUPABASE_URL }) {
+  const [profiles, setProfiles] = useState({});
+  const [confirmRemove, setConfirmRemove] = useState(null);
+  const [handicaps, setHandicaps] = useState({});
+
+  useEffect(() => {
+    const loadProfiles = async () => {
+      const ids = [
+        ...partners.map(p => p.requester_id === user.id ? p.recipient_id : p.requester_id),
+        ...partnerRequests.map(p => p.requester_id),
+        ...(sentRequests||[]).map(p => p.recipient_id),
+      ].filter((id, i, a) => a.indexOf(id) === i && !profiles[id]);
+      for (const id of ids) {
+        try {
+          const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${id}&select=id,name,last_name,member_number`, { headers: { ...drawerAuthHeaders(), "Accept": "application/vnd.pgrst.object+json" } });
+          if (res.ok) { const p = await res.json(); setProfiles(prev => ({ ...prev, [id]: p })); }
+        } catch {}
+      }
+      // Load handicaps and trends for accepted partners
+      const partnerIds = partners.map(p => p.requester_id === user.id ? p.recipient_id : p.requester_id);
+      for (const id of partnerIds) {
+        try {
+          const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 18);
+          const res = await fetch(`${SUPABASE_URL}/rest/v1/rounds?user_id=eq.${id}&date=gte.${cutoff.toISOString().split('T')[0]}&select=differential,date&order=date.desc`, { headers: drawerAuthHeaders() });
+          if (res.ok) {
+            const rounds = await res.json();
+            if (Array.isArray(rounds) && rounds.length >= 10) {
+              const recent = rounds.slice(0, 12);
+              const sorted = [...recent].sort((a,b) => a.differential - b.differential);
+              const middle = recent.length >= 12 ? sorted.slice(1,11) : sorted;
+              const avg = middle.reduce((s,r) => s + r.differential, 0) / middle.length;
+              setHandicaps(prev => ({ ...prev, [id]: Math.trunc(avg) }));
+              // Calculate trend using calcStreak
+              const result = calcStreak(rounds);
+              setTrends(prev => ({ ...prev, [id]: result.trend }));
+              setStreaks(prev => ({ ...prev, [id]: result }));
+            } else {
+              setHandicaps(prev => ({ ...prev, [id]: null }));
+            }
+          }
+        } catch {}
+      }
+    };
+    loadProfiles();
+  }, [partners, partnerRequests]);
+
+  const rowStyle = { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'11px 14px', background:'rgba(8,18,36,0.6)', border:'1px solid rgba(201,168,76,0.13)', borderRadius:4, marginBottom:8 };
+  const labelStyle = { fontSize:7, fontWeight:700, letterSpacing:3, textTransform:'uppercase', color:'rgba(201,168,76,0.6)', marginBottom:3, display:'block', paddingLeft:4 };
+  const inputStyle = { background:'rgba(8,18,36,0.8)', border:'1px solid rgba(201,168,76,0.25)', borderRadius:3, padding:'9px 10px 9px 10px', color:'#f5f0e8', fontSize:13, outline:'none', width:'100%' };
+  const btnSm = (color) => ({ padding:'5px 10px', background:color==='red'?'linear-gradient(135deg,#c41e3a,#9e1830)':color==='green'?'linear-gradient(135deg,#4caa18,#2d7a0e)':'transparent', border:color==='ghost'?'1px solid rgba(201,168,76,0.3)':'none', borderRadius:3, color:'#f5f0e8', fontSize:9, fontWeight:700, letterSpacing:2, textTransform:'uppercase', cursor:'pointer' });
+
+  const alreadyPartner = (id) => partners.some(p => p.requester_id === id || p.recipient_id === id) || (sentRequests||[]).some(p => p.recipient_id === id);
+  const alreadyRequested = (id) => searchResults.some(() => false); // checked server side
+
+  return (
+    <>
+      <div onClick={onBack} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:200}} />
+      <div style={{position:'fixed',top:0,right:0,bottom:0,width:272,background:'#0d1b2e',borderLeft:'1px solid rgba(201,168,76,0.18)',zIndex:201,display:'flex',flexDirection:'column'}}>
+        <div style={{background:'linear-gradient(180deg,#112240 0%,#0d1b2e 100%)',padding:'16px 20px 14px',flexShrink:0}}>
+          <div style={{marginBottom:4}}>
+            <button onClick={onBack} style={{background:'none',border:'none',color:'rgba(201,168,76,0.5)',fontSize:11,letterSpacing:2,textTransform:'uppercase',cursor:'pointer',padding:0}}>← Back</button>
+          </div>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:4,textTransform:'uppercase',color:'#e8b84b',marginTop:8,paddingLeft:4}}>My Playing Partners</div>
+        </div>
+        <div style={{height:1,background:'rgba(201,168,76,0.12)',flexShrink:0}} />
+        <div style={{flex:1,overflowY:'auto',padding:'16px 20px'}}>
+
+          {/* Search by member number */}
+          <div style={{marginBottom:20}}>
+            <label style={labelStyle}>Add a Partner</label>
+            <input style={inputStyle} placeholder="Enter Member #" value={partnerSearch}
+              onChange={e=>{
+                const raw = e.target.value.replace(/[^0-9]/g,'').slice(0,8);
+                const formatted = raw.length > 4 ? raw.slice(0,4) + '-' + raw.slice(4) : raw;
+                setPartnerSearch(formatted);
+                searchUsers(formatted);
+              }} autoComplete="off" inputMode="numeric" maxLength={9}/>
+            {searchLoading&&<div style={{fontSize:10,color:'rgba(245,240,232,0.3)',letterSpacing:1,marginTop:6}}>Looking up member...</div>}
+            {!searchLoading&&partnerSearch.length>=4&&searchResults.length===0&&<div style={{fontSize:10,color:'rgba(245,240,232,0.3)',letterSpacing:1,marginTop:6}}>No member found with that number</div>}
+            {searchResults.length>0&&(
+              <div style={{marginTop:8,border:'1px solid rgba(201,168,76,0.25)',borderRadius:4,overflow:'hidden'}}>
+                {searchResults.map(r=>{
+                  const isPartner=alreadyPartner(r.id);
+                  return(
+                    <div key={r.id} onClick={()=>!isPartner&&!partnerLoading&&sendRequest(r.id)}
+                      style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 14px',background:'rgba(8,18,36,0.6)',cursor:isPartner?'default':'pointer'}}
+                      onMouseEnter={e=>{if(!isPartner)e.currentTarget.style.background='rgba(232,184,75,0.08)'}}
+                      onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'}>
+                      <div>
+                        <div style={{fontSize:14,color:'#f5f0e8',fontWeight:600}}>{r.last_name ? `${r.name} ${r.last_name.trim()[0].toUpperCase()}` : r.name}</div>
+                        <div style={{fontSize:9,color:'rgba(201,168,76,0.6)',letterSpacing:1,marginTop:2}}>{r.member_number}</div>
+                      </div>
+                      {isPartner
+                        ? <span style={{fontSize:9,color:'rgba(245,240,232,0.3)',letterSpacing:1,textTransform:'uppercase'}}>Already Added</span>
+                        : <span style={{fontSize:9,color:'#84e040',letterSpacing:1,textTransform:'uppercase',fontWeight:700}}>{partnerLoading?'Sending...':'+ Send Request'}</span>
+                      }
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Pending requests */}
+          {partnerRequests.length>0&&(
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#e02247',marginBottom:10,display:'flex',alignItems:'center',gap:6,paddingLeft:4}}>
+                Pending Requests
+                <span style={{width:16,height:16,borderRadius:'50%',background:'#e02247',display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:400,color:'#fff',lineHeight:1,fontFamily:'Georgia,serif',fontStyle:'normal'}}>!</span>
+              </div>
+              {partnerRequests.map(req=>{
+                const p=profiles[req.requester_id];
+                return(
+                  <div key={req.id} style={{...rowStyle,flexDirection:'column',alignItems:'flex-start',gap:10}}>
+                    <div>
+                      <div style={{fontSize:13,color:'#f5f0e8',fontWeight:500}}>{p ? displayName(p.name, p.last_name) : '...'}</div>
+                      <div style={{fontSize:9,color:'rgba(201,168,76,0.6)',letterSpacing:1}}>{p?.member_number||''}</div>
+                    </div>
+                    <div style={{display:'flex',gap:8}}>
+                      <button onClick={()=>respondToRequest(req.id,true)} style={btnSm('green')}>Accept</button>
+                      <button onClick={()=>respondToRequest(req.id,false)} style={btnSm('red')}>Decline</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Sent requests */}
+          {(sentRequests||[]).length>0&&(
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(201,168,76,0.6)',marginBottom:10,paddingLeft:4}}>Awaiting Response</div>
+              {sentRequests.map(req=>{
+                const p=profiles[req.recipient_id];
+                return(
+                  <div key={req.id} style={{...rowStyle,alignItems:'center'}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,color:'rgba(245,240,232,0.6)',fontWeight:500}}>{p ? displayName(p.name, p.last_name) : '...'}</div>
+                      <div style={{fontSize:9,color:'rgba(201,168,76,0.4)',letterSpacing:1}}>{p?.member_number||''}</div>
+                    </div>
+                    <span style={{fontSize:9,letterSpacing:1,textTransform:'uppercase',color:'rgba(196,30,58,0.5)'}}>Pending</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Partners list */}
+          <div>
+            <div style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#e8b84b',marginBottom:10,paddingLeft:4}}>Partners ({partners.length})</div>
+            {partners.length===0
+              ? <div style={{fontSize:12,color:'rgba(245,240,232,0.3)',fontStyle:'italic',textAlign:'left',padding:'8px 0',paddingLeft:4}}>No partners yet</div>
+              : partners.map(p=>{
+                  const otherId=p.requester_id===user.id?p.recipient_id:p.requester_id;
+                  const prof=profiles[otherId];
+                  return(
+                    <PartnerRow key={p.id} p={p} prof={prof} otherId={otherId} handicaps={handicaps} onRemove={()=>setConfirmRemove(p.id)} rowStyle={rowStyle} />
+                  );
+                })
+            }
+          </div>
+
+          {/* Who's Hot / Who's Not */}
+          <HotNotSection user={user} partners={partners} profiles={profiles} trends={trends} streaks={streaks} handicaps={handicaps} userRounds={userRounds} />
+        </div>
+
+        {/* Confirm remove modal */}
+        {confirmRemove&&(
+          <div onClick={()=>setConfirmRemove(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:'#112240',border:'1px solid rgba(232,184,75,0.4)',borderRadius:6,padding:'24px 20px',maxWidth:260,width:'90%',textAlign:'center'}}>
+              <div style={{fontSize:11,letterSpacing:3,textTransform:'uppercase',color:'#e8b84b',marginBottom:12}}>Remove Partner</div>
+              <div style={{fontSize:13,color:'rgba(245,240,232,0.7)',marginBottom:20,lineHeight:1.6}}>Are you sure you want to remove this partner?</div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                <button onClick={()=>{removePartner(confirmRemove);setConfirmRemove(null);}} style={{...btnSm('red'),width:'100%',padding:10,fontSize:11,transition:'filter 0.15s ease'}} onMouseEnter={e=>e.currentTarget.style.filter='brightness(1.2)'} onMouseLeave={e=>e.currentTarget.style.filter='none'}>Yes, Remove</button>
+                <button onClick={()=>setConfirmRemove(null)} style={{...btnSm('ghost'),width:'100%',padding:10,fontSize:11,transition:'all 0.15s ease'}} onMouseEnter={e=>{e.currentTarget.style.background='rgba(201,168,76,0.1)';e.currentTarget.style.borderColor='rgba(201,168,76,0.6)';e.currentTarget.style.color='rgba(201,168,76,0.9)';}} onMouseLeave={e=>{e.currentTarget.style.background='transparent';e.currentTarget.style.borderColor='rgba(201,168,76,0.3)';e.currentTarget.style.color='rgba(201,168,76,0.6)';}}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─── Support Panel ─────────────────────────────────────────────────────────────
+function SupportPanel({ user, onBack }) {
+  const [form, setForm] = useState({ name: user.name + (user.lastName ? ' ' + user.lastName : ''), email: user.email, message: '' });
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async () => {
+    setError('');
+    if (!form.message.trim()) return setError('Please enter a message');
+    setSending(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/send-contact-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+        body: JSON.stringify({ name: form.name, email: form.email, message: `Member #: ${user.memberNumber}\n\n${form.message}` }),
+      });
+      if (res.ok) {
+        setSent(true);
+        setForm(p => ({ ...p, message: '' }));
+      } else {
+        setError('Something went wrong — please try again');
+      }
+    } catch {
+      setError('Network error — please try again');
+    }
+    setSending(false);
+  };
+
+  const labelStyle = { fontSize:7, fontWeight:700, letterSpacing:3, textTransform:'uppercase', color:'rgba(201,168,76,0.6)', marginBottom:4, display:'block' };
+  const inputStyle = { background:'rgba(8,18,36,0.8)', border:'1px solid rgba(201,168,76,0.25)', borderRadius:3, padding:'9px 10px', color:'#f5f0e8', fontSize:13, outline:'none', width:'100%' };
+
+  return (
+    <>
+      <div onClick={onBack} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:200}} />
+      <div style={{position:'fixed',top:0,right:0,bottom:0,width:272,background:'#0d1b2e',borderLeft:'1px solid rgba(201,168,76,0.18)',zIndex:201,display:'flex',flexDirection:'column'}}>
+        <div style={{background:'linear-gradient(180deg,#112240 0%,#0d1b2e 100%)',padding:'16px 20px 14px',flexShrink:0}}>
+          <div style={{marginBottom:4}}>
+            <button onClick={onBack} style={{background:'none',border:'none',color:'rgba(201,168,76,0.5)',fontSize:11,letterSpacing:2,textTransform:'uppercase',cursor:'pointer',padding:0}}>← Back</button>
+          </div>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:4,textTransform:'uppercase',color:'#e8b84b',marginTop:8}}>Support</div>
+        </div>
+        <div style={{height:1,background:'rgba(201,168,76,0.12)',flexShrink:0}} />
+        <div style={{flex:1,overflowY:'auto',padding:'20px'}}>
+          {sent ? (
+            <div style={{textAlign:'center',padding:'32px 0',display:'flex',flexDirection:'column',alignItems:'center',gap:16}}>
+              <div style={{fontSize:28,color:'#84e040'}}>✓</div>
+              <div style={{fontSize:13,fontWeight:700,letterSpacing:2,textTransform:'uppercase',color:'#84e040'}}>Message Sent</div>
+              <div style={{fontSize:12,color:'rgba(245,240,232,0.5)',lineHeight:1.7,textAlign:'center'}}>We'll get back to you at {form.email} as soon as possible</div>
+              <button onClick={()=>setSent(false)} style={{marginTop:8,background:'none',border:'1px solid rgba(201,168,76,0.3)',borderRadius:3,padding:'8px 16px',color:'rgba(201,168,76,0.6)',fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>Send Another</button>
+            </div>
+          ) : (
+            <>
+              <div style={{fontSize:11,color:'rgba(245,240,232,0.5)',lineHeight:1.7,marginBottom:20,whiteSpace:'nowrap'}}>
+                <div>Have an issue or a question?</div>
+                <div>Send a message in the box provided below</div>
+                <div>and you will receive a reply as soon as possible</div>
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={labelStyle}>Name</label>
+                <input style={{...inputStyle,opacity:0.6}} value={form.name} readOnly />
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={labelStyle}>Member #</label>
+                <input style={{...inputStyle,opacity:0.6}} value={user.memberNumber} readOnly />
+              </div>
+              <div style={{marginBottom:12}}>
+                <label style={labelStyle}>Email</label>
+                <input style={inputStyle} value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} type="email" />
+              </div>
+              <div style={{marginBottom:14}}>
+                <label style={labelStyle}>Message</label>
+                <textarea style={{...inputStyle,minHeight:120,resize:'vertical',lineHeight:1.6}} placeholder="" value={form.message} onChange={e=>setForm(p=>({...p,message:e.target.value}))} />
+              </div>
+              {error && <div style={{fontSize:11,color:'#e02247',letterSpacing:1,marginBottom:10}}>{error}</div>}
+              <button onClick={handleSubmit} disabled={sending} style={{width:'100%',padding:12,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',opacity:sending?0.5:1}}>
+                {sending ? 'Sending...' : 'Send Message'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Profile Drawer ────────────────────────────────────────────────────────────
-function ProfileDrawer({ user, roundCount, handicap, onClose, onSignOut }) {
+function ProfileDrawer({ user, roundCount, handicap, userRounds, onClose, onSignOut, onPartnerUpdate }) {
+  const [subPanel, setSubPanel] = useState(null);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [partners, setPartners] = useState([]);
+  const [partnerRequests, setPartnerRequests] = useState([]);
+  const [sentRequests, setSentRequests] = useState([]);
+  const [trends, setTrends] = useState({});
+  const [streaks, setStreaks] = useState({});
+  const [partnerSearch, setPartnerSearch] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [partnerLoading, setPartnerLoading] = useState(false);
+  const [partnerProfiles, setPartnerProfiles] = useState({});
+
+  useEffect(() => {
+    if (subPanel === 'partners') fetchPartners();
+  }, [subPanel]);
+
+  // Fetch pending count on drawer open
+  useEffect(() => {
+    fetchPartners();
+  }, []);
+  const [pwForm, setPwForm] = useState({ current:'', next:'', confirm:'' });
+  const [showPwForm, setShowPwForm] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState('');
+  const [pwLoading, setPwLoading] = useState(false);
+
+  const anonHeaders = { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY };
+  const authHeaders = () => {
+    try {
+      const s = JSON.parse(localStorage.getItem("sb-session") || "{}");
+      return { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${s?.access_token || SUPABASE_ANON_KEY}` };
+    } catch { return anonHeaders; }
+  };
+
+  const handlePasswordChange = async () => {
+    setPwError(''); setPwSuccess('');
+    if (!pwForm.current) return setPwError('Please enter your current password.');
+    if (pwForm.next.length < 6) return setPwError('New password must be at least 6 characters.');
+    if (pwForm.next !== pwForm.confirm) return setPwError('New passwords do not match.');
+    setPwLoading(true);
+    // Re-authenticate to verify current password
+    const verifyRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: 'POST', headers: anonHeaders,
+      body: JSON.stringify({ email: user.email, password: pwForm.current }),
+    });
+    if (!verifyRes.ok) { setPwLoading(false); return setPwError('Current password is incorrect.'); }
+    const { access_token } = await verifyRes.json();
+    // Update password
+    const updateRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: 'PUT',
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${access_token}` },
+      body: JSON.stringify({ password: pwForm.next }),
+    });
+    if (!updateRes.ok) { setPwLoading(false); return setPwError('Failed to update password. Please try again.'); }
+    setPwSuccess('Password updated successfully')
+    setPwForm({ current:'', next:'', confirm:'' });
+    setPwLoading(false);
+  };
+
+  const rowStyle = { background:'rgba(8,18,36,0.6)', border:'1px solid rgba(201,168,76,0.13)', borderRadius:4, padding:'12px 14px', marginBottom:8 };
+  const labelStyle = { fontSize:7, fontWeight:700, letterSpacing:3, textTransform:'uppercase', color:'rgba(201,168,76,0.6)', marginBottom:4, display:'block' };
+  const valueStyle = { fontSize:13, fontWeight:600, color:'rgba(245,240,232,0.65)', letterSpacing:0.5 };
+  const inputStyle = { background:'rgba(8,18,36,0.8)', border:'1px solid rgba(201,168,76,0.25)', borderRadius:3, padding:'9px 10px', color:'#f5f0e8', fontSize:13, outline:'none', width:'100%' };
+
+  const drawerAuthHeaders = () => {
+    try {
+      const s = JSON.parse(localStorage.getItem("sb-session") || "{}");
+      return { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${s?.access_token || SUPABASE_ANON_KEY}` };
+    } catch { return { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` }; }
+  };
+
+  // Fetch partners and pending requests
+  const fetchPartners = async () => {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/partners?or=(requester_id.eq.${user.id},recipient_id.eq.${user.id})&select=*`, { headers: drawerAuthHeaders() });
+      const data = await res.json();
+      if (res.ok && Array.isArray(data)) {
+        const accepted = data.filter(p => p.status === 'accepted');
+        const pendingReceived = data.filter(p => p.status === 'pending' && p.recipient_id === user.id);
+        const pendingSent = data.filter(p => p.status === 'pending' && p.requester_id === user.id);
+        setPartners(accepted);
+        setPartnerRequests(pendingReceived);
+        setSentRequests(pendingSent);
+        setPendingCount(pendingReceived.length);
+        if (onPartnerUpdate) onPartnerUpdate();
+      }
+    } catch {}
+  };
+
+  // Fetch partner profile details
+  const getProfile = async (id) => {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${id}&select=id,name,last_name,member_number`, { headers: { ...drawerAuthHeaders(), "Accept": "application/vnd.pgrst.object+json" } });
+      if (res.ok) return await res.json();
+    } catch {}
+    return null;
+  };
+
+  const searchUsers = async (query) => {
+    if (query.length < 4) { setSearchResults([]); return; }
+    setSearchLoading(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?member_number=ilike.${encodeURIComponent(query)}*&select=id,name,last_name,member_number&limit=5`, { headers: drawerAuthHeaders() });
+      const data = await res.json();
+      if (res.ok && Array.isArray(data)) {
+        setSearchResults(data.filter(p => p.id !== user.id));
+      }
+    } catch {}
+    setSearchLoading(false);
+  };
+
+  const sendRequest = async (recipientId) => {
+    setPartnerLoading(true);
+    await fetch(`${SUPABASE_URL}/rest/v1/partners`, {
+      method: 'POST',
+      headers: { ...drawerAuthHeaders(), "Prefer": "return=representation" },
+      body: JSON.stringify({ requester_id: user.id, recipient_id: recipientId, status: 'pending' }),
+    });
+    setPartnerSearch(''); setSearchResults([]);
+    await fetchPartners();
+    setPartnerLoading(false);
+  };
+
+  const respondToRequest = async (partnerId, accept) => {
+    if (accept) {
+      await fetch(`${SUPABASE_URL}/rest/v1/partners?id=eq.${partnerId}`, {
+        method: 'PATCH',
+        headers: { ...drawerAuthHeaders(), "Prefer": "return=representation" },
+        body: JSON.stringify({ status: 'accepted' }),
+      });
+    } else {
+      await fetch(`${SUPABASE_URL}/rest/v1/partners?id=eq.${partnerId}`, { method: 'DELETE', headers: drawerAuthHeaders() });
+    }
+    await fetchPartners();
+  };
+
+  const removePartner = async (partnerId) => {
+    await fetch(`${SUPABASE_URL}/rest/v1/partners?id=eq.${partnerId}`, { method: 'DELETE', headers: drawerAuthHeaders() });
+    await fetchPartners();
+  };
+
+  if (subPanel === 'partners') return (
+    <PartnersPanel
+      user={user}
+      partners={partners}
+      partnerRequests={partnerRequests}
+      sentRequests={sentRequests}
+      trends={trends}
+      streaks={streaks}
+      userRounds={userRounds}
+      partnerSearch={partnerSearch}
+      setPartnerSearch={setPartnerSearch}
+      searchResults={searchResults}
+      searchUsers={searchUsers}
+      searchLoading={searchLoading}
+      partnerLoading={partnerLoading}
+      sendRequest={sendRequest}
+      respondToRequest={respondToRequest}
+      removePartner={removePartner}
+      fetchPartners={fetchPartners}
+      onBack={()=>setSubPanel(null)}
+      drawerAuthHeaders={drawerAuthHeaders}
+      SUPABASE_URL={SUPABASE_URL}
+    />
+  );
+
+  if (subPanel === 'support') return (
+    <SupportPanel user={user} onBack={()=>setSubPanel(null)} />
+  );
+
+  if (subPanel === 'account') return (
+    <>
+      <div onClick={()=>setSubPanel(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:200}} />
+      <div style={{position:'fixed',top:0,right:0,bottom:0,width:272,background:'#0d1b2e',borderLeft:'1px solid rgba(201,168,76,0.18)',zIndex:201,display:'flex',flexDirection:'column'}}>
+        <div style={{background:'linear-gradient(180deg,#112240 0%,#0d1b2e 100%)',padding:'16px 20px 14px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+            <button onClick={()=>setSubPanel(null)} style={{background:'none',border:'none',color:'rgba(201,168,76,0.5)',fontSize:11,letterSpacing:2,textTransform:'uppercase',cursor:'pointer',padding:0}}>← Back</button>
+          </div>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:4,textTransform:'uppercase',color:'#e8b84b',marginTop:18}}>Account Information</div>
+        </div>
+        <div style={{height:1,background:'rgba(201,168,76,0.12)'}} />
+        <div style={{padding:'16px 20px',flex:1,overflowY:'auto'}}>
+          <div style={rowStyle}><span style={labelStyle}>Full Name</span><span style={valueStyle}>{user.name}{user.lastName ? ' ' + user.lastName : ''}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Email</span><span style={valueStyle}>{user.email}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Member #</span><span style={valueStyle}>{user.memberNumber}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Member Since</span><span style={valueStyle}>{new Date(user.createdAt).toLocaleDateString('en-US',{month:'long',year:'numeric'})}</span></div>
+
+          <div style={{height:1,background:'rgba(201,168,76,0.12)',margin:'16px 0'}} />
+          <div onClick={()=>{setShowPwForm(p=>!p);setPwError('');setPwSuccess('');setPwForm({current:'',next:'',confirm:''}); }} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.13)',borderRadius:4,cursor:'pointer'}}
+            onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'}
+            onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'}>
+            <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>Change Password</span>
+            <span style={{fontSize:14,color:'rgba(245,240,232,0.3)',transform:showPwForm?'rotate(90deg)':'none',transition:'transform 0.2s ease'}}>›</span>
+          </div>
+          {showPwForm&&(
+            <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:10}}>
+              <div><label style={labelStyle}>Current Password</label><input style={inputStyle} type="password" placeholder="Current password" value={pwForm.current} onChange={e=>setPwForm(p=>({...p,current:e.target.value}))}/></div>
+              <div><label style={labelStyle}>New Password</label><input style={inputStyle} type="password" placeholder="Min. 6 characters" value={pwForm.next} onChange={e=>setPwForm(p=>({...p,next:e.target.value}))}/></div>
+              <div><label style={labelStyle}>Confirm New Password</label><input style={inputStyle} type="password" placeholder="Re-enter new password" value={pwForm.confirm} onChange={e=>setPwForm(p=>({...p,confirm:e.target.value}))}/></div>
+              {pwError && <div style={{fontSize:11,color:'#e02247',letterSpacing:1}}>{pwError}</div>}
+              {pwSuccess && <div style={{fontSize:11,color:'#84e040',letterSpacing:1}}>{pwSuccess}</div>}
+              <button onClick={handlePasswordChange} disabled={pwLoading} style={{width:'100%',padding:11,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',opacity:pwLoading?0.5:1}}>
+                {pwLoading ? 'Updating...' : 'Update Password'}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <>
       <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:200}} />
@@ -503,10 +1038,10 @@ function ProfileDrawer({ user, roundCount, handicap, onClose, onSignOut }) {
           </div>
           <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
             <div style={{fontSize:9,fontWeight:600,letterSpacing:3,textTransform:'uppercase',color:'rgba(245,240,232,0.4)'}}>Welcome,</div>
-            <div style={{fontSize:20,fontWeight:800,color:'#f5f0e8',textAlign:'center',letterSpacing:1}}>{user.name.split(' ')[0]}</div>
+            <div style={{fontSize:20,fontWeight:800,color:'#f5f0e8',textAlign:'center',letterSpacing:1}}>{user.name}</div>
           </div>
           <div style={{marginTop:12,background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.13)',borderRadius:4,padding:'10px',textAlign:'center',display:'flex',flexDirection:'column',minHeight:72}}>
-            <div style={{fontSize:7,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(245,240,232,0.4)',marginBottom:3}}>Membership #:</div>
+            <div style={{fontSize:7,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(245,240,232,0.4)',marginBottom:3}}>Member #:</div>
             <div style={{fontSize:13,fontWeight:700,color:'#e8b84b',letterSpacing:2}}>{user.memberNumber}</div>
             <div style={{fontSize:9,color:'rgba(245,240,232,0.35)',marginTop:'auto',paddingTop:10,letterSpacing:1}}>member since {new Date(user.createdAt).toLocaleDateString('en-US',{year:'numeric'})}</div>
           </div>
@@ -520,23 +1055,36 @@ function ProfileDrawer({ user, roundCount, handicap, onClose, onSignOut }) {
         </div>
         <div style={{height:1,background:'rgba(201,168,76,0.08)'}} />
         <div style={{padding:'12px 20px',display:'flex',flexDirection:'column',gap:8}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.13)',borderRadius:4,cursor:'pointer'}}
+          <div onClick={()=>setSubPanel('partners')} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.13)',borderRadius:4,cursor:'pointer'}}
             onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'}
             onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'}>
-            <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>My Playing Partners</span>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>My Playing Partners</span>
+              {pendingCount>0&&<span style={{width:16,height:16,borderRadius:'50%',background:'#e02247',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:400,color:'#fff',lineHeight:1,flexShrink:0,fontFamily:'Georgia,serif',fontStyle:'normal'}}>!</span>}
+            </div>
             <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
           </div>
         </div>
         <div style={{height:1,background:'rgba(201,168,76,0.08)'}} />
         <div style={{padding:'10px 20px',display:'flex',flexDirection:'column',gap:6,flex:1,overflowY:'auto'}}>
-          {['Account Information','Membership & Payment','Support'].map(label=>(
-            <div key={label} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.13)',borderRadius:4,cursor:'pointer'}}
-              onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'}
-              onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'}>
-              <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>{label}</span>
-              <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
-            </div>
-          ))}
+          <div onClick={()=>setSubPanel('account')} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.13)',borderRadius:4,cursor:'pointer'}}
+            onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'}
+            onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'}>
+            <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>Account Information</span>
+            <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.13)',borderRadius:4,cursor:'pointer'}}
+            onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'}
+            onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'}>
+            <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>Membership & Payment</span>
+            <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
+          </div>
+          <div onClick={()=>setSubPanel('support')} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.13)',borderRadius:4,cursor:'pointer'}}
+            onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'}
+            onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'}>
+            <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>Support</span>
+            <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
+          </div>
         </div>
         <div style={{padding:'12px 20px 28px',flexShrink:0}}>
           <button onClick={onSignOut} className="signout-btn" style={{width:'100%',padding:10,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>
@@ -563,6 +1111,8 @@ function AppContent({ user, onSignOut }) {
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [pendingPartnerCount, setPendingPartnerCount] = useState(0);
+  const [courses, setCourses] = useState([]);
 
   const authHeaders = () => {
     try {
@@ -572,12 +1122,67 @@ function AppContent({ user, onSignOut }) {
     } catch { return { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` }; }
   };
 
+  const getValidToken = async () => {
+    try {
+      const s = JSON.parse(localStorage.getItem("sb-session") || "{}");
+      if (!s?.access_token) return SUPABASE_ANON_KEY;
+      if (s.expires_at && Date.now() / 1000 > s.expires_at - 60) {
+        if (s.refresh_token) {
+          const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
+            body: JSON.stringify({ refresh_token: s.refresh_token }),
+          });
+          const data = await res.json();
+          if (res.ok && data.access_token) {
+            localStorage.setItem("sb-session", JSON.stringify({ access_token: data.access_token, refresh_token: data.refresh_token, expires_at: data.expires_at, user: data.user }));
+            return data.access_token;
+          }
+        }
+      }
+      return s.access_token;
+    } catch { return SUPABASE_ANON_KEY; }
+  };
+
+  const authHeadersAsync = async () => {
+    const token = await getValidToken();
+    return { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${token}` };
+  };
+
+  // Load courses from Supabase
+  useEffect(() => {
+    const fetchCourses = async () => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/courses?select=id,name,location,tees(id,name,rating,slope)&order=name.asc`, {
+          headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` }
+        });
+        const data = await res.json();
+        if (res.ok && Array.isArray(data)) setCourses(data);
+      } catch {}
+    };
+    fetchCourses();
+  }, []);
+
+  // Load pending partner requests count
+  useEffect(() => {
+    const fetchPendingCount = async () => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/partners?recipient_id=eq.${user.id}&status=eq.pending&select=id`, { headers: authHeaders() });
+        const data = await res.json();
+        if (res.ok && Array.isArray(data)) setPendingPartnerCount(data.length);
+      } catch {}
+    };
+    fetchPendingCount();
+    const interval = setInterval(fetchPendingCount, 30000);
+    return () => clearInterval(interval);
+  }, [user.id]);
+
   // Load rounds from Supabase
   useEffect(() => {
     const fetchRounds = async () => {
       setLoadingRounds(true);
       try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/rounds?user_id=eq.${user.id}&select=*&order=date.desc,id.desc`, { headers: authHeaders() });
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/rounds?user_id=eq.${user.id}&select=*&order=date.desc,id.desc`, { headers: await authHeadersAsync() });
         const data = await res.json();
         if (res.ok && Array.isArray(data)) setRounds(data);
       } catch (e) {}
@@ -606,23 +1211,31 @@ function AppContent({ user, onSignOut }) {
     try {
       const res = await fetch(`${SUPABASE_URL}/rest/v1/rounds`, {
         method: "POST",
-        headers: { ...authHeaders(), "Prefer": "return=representation" },
+        headers: { ...(await authHeadersAsync()), "Prefer": "return=representation" },
         body: JSON.stringify({ user_id: user.id, course: course.trim() || "Unknown Course", score: s, rating: r, slope: sl, tee: tee || null, date: date || todayStr, differential }),
       });
       const data = await res.json();
       const row = Array.isArray(data) ? data[0] : data;
       if (res.ok && row?.id) {
         setRounds(prev => [row, ...prev].sort((a, b) => new Date(b.date) - new Date(a.date) || b.id - a.id));
+        setForm({ course:"", score:"", rating:"", slope:"", tee:"", date:localDateStr() });
+        setCourseSearch(""); setShowDropdown(false); setConfirmPost(false); setSelectedCourse(null);
+        setSaving(false);
+        setAdded(true); setTimeout(() => setAdded(false), 2000);
+      } else {
+        console.error("Round post failed:", data);
+        setSaving(false);
+        alert("Failed to post round: " + (data?.message || data?.error || "Unknown error — check console"));
       }
-    } catch (e) {}
-    setForm({ course:"", score:"", rating:"", slope:"", tee:"", date:localDateStr() });
-    setCourseSearch(""); setShowDropdown(false); setConfirmPost(false); setSelectedCourse(null);
-    setSaving(false);
-    setAdded(true); setTimeout(() => setAdded(false), 2000);
+    } catch (e) {
+      console.error("Round post error:", e);
+      setSaving(false);
+      alert("Network error posting round");
+    }
   };
 
   const handleDelete = async (id) => {
-    await fetch(`${SUPABASE_URL}/rest/v1/rounds?id=eq.${id}&user_id=eq.${user.id}`, { method: "DELETE", headers: authHeaders() });
+    await fetch(`${SUPABASE_URL}/rest/v1/rounds?id=eq.${id}&user_id=eq.${user.id}`, { method: "DELETE", headers: await authHeadersAsync() });
     setRounds(prev => prev.filter(r => r.id !== id));
     setPendingDelete(null);
   };
@@ -684,7 +1297,7 @@ function AppContent({ user, onSignOut }) {
     <div style={S.app}>
       <style>{globalStyles}</style>
 
-      {showProfile && <ProfileDrawer user={user} roundCount={rounds.length} handicap={calcHandicapDecimal(rounds)} onClose={()=>setShowProfile(false)} onSignOut={onSignOut} />}
+      {showProfile && <ProfileDrawer user={user} roundCount={rounds.length} handicap={calcHandicapDecimal(rounds)} userRounds={rounds} onClose={()=>{setShowProfile(false);}} onSignOut={onSignOut} onPartnerUpdate={()=>{const fetchCount=async()=>{try{const res=await fetch(`${SUPABASE_URL}/rest/v1/partners?recipient_id=eq.${user.id}&status=eq.pending&select=id`,{headers:authHeaders()});const d=await res.json();if(res.ok&&Array.isArray(d))setPendingPartnerCount(d.length);}catch{}};fetchCount();}} />}
 
       {pendingDelete && (
         <div onClick={()=>setPendingDelete(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:999}}>
@@ -726,8 +1339,9 @@ function AppContent({ user, onSignOut }) {
       {/* Header */}
       <div style={S.header}>
         <div style={{position:'absolute',top:14,right:16,zIndex:10}} className="avatar-wrap">
-          <button className="avatar-btn" onClick={()=>setShowProfile(true)} style={{width:30,height:30,borderRadius:'50%',background:'linear-gradient(135deg,#1a3a5c,#112240)',border:'1.5px solid rgba(232,184,75,0.32)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',padding:0}}>
+          <button className="avatar-btn" onClick={()=>setShowProfile(true)} style={{width:30,height:30,borderRadius:'50%',background:'linear-gradient(135deg,#1a3a5c,#112240)',border:'1.5px solid rgba(232,184,75,0.32)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',padding:0,position:'relative'}}>
             <svg width="16" height="18" viewBox="0 0 16 18" fill="none"><line x1="7" y1="1" x2="7" y2="17" stroke="#e8b84b" strokeWidth="1.8" strokeLinecap="round"/><polygon points="7,1 14,4 7,7" fill="#e8b84b"/></svg>
+            {pendingPartnerCount>0&&<span style={{position:'absolute',top:-4,right:-4,width:16,height:16,borderRadius:'50%',background:'#e02247',border:'2px solid #0d1b2e',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:400,color:'#fff',lineHeight:1,fontFamily:'Georgia,serif',fontStyle:'normal'}}>!</span>}
           </button>
           <div className="avatar-tooltip">Account</div>
         </div>
@@ -764,7 +1378,7 @@ function AppContent({ user, onSignOut }) {
                 onChange={e=>{setForm(p=>({...p,course:e.target.value,rating:'',tee:''}));setCourseSearch(e.target.value);setShowDropdown(true);setSelectedCourse(null);}}
                 onFocus={()=>setShowDropdown(true)} onBlur={()=>setTimeout(()=>setShowDropdown(false),150)} autoComplete="off"/>
               {showDropdown&&courseSearch.length>=2&&(()=>{
-                const matches=COURSES.filter(c=>c.name.toLowerCase().includes(courseSearch.toLowerCase())||c.location.toLowerCase().includes(courseSearch.toLowerCase())).slice(0,8);
+                const matches=courses.filter(c=>c.name.toLowerCase().includes(courseSearch.toLowerCase())||c.location.toLowerCase().includes(courseSearch.toLowerCase())).slice(0,8);
                 if(!matches.length)return null;
                 return(
                   <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:100,background:'#112240',border:'1px solid rgba(232,184,75,0.4)',borderRadius:'0 0 4px 4px',maxHeight:220,overflowY:'auto',boxShadow:'0 8px 24px rgba(0,0,0,0.4)'}}>
@@ -780,7 +1394,7 @@ function AppContent({ user, onSignOut }) {
                 );
               })()}
             </div>
-            <div style={{fontSize:9,letterSpacing:1,color:'rgba(232,184,75,0.4)',marginTop:-8,marginBottom:12,paddingLeft:4}}>Can't find your course? Enter all information manually instead</div>
+            <div style={{fontSize:10,letterSpacing:1,color:'rgba(232,184,75,0.55)',marginTop:-8,marginBottom:12,paddingLeft:4}}>Can't find your course? Enter all information manually instead</div>
             {selectedCourse&&(
               <div style={{marginBottom:12}}>
                 <label style={{...S.label,paddingLeft:2}}>Tees</label>
@@ -853,7 +1467,7 @@ function AppContent({ user, onSignOut }) {
                 </div>
               ) : (()=>{
                 const filtered=courseFilter==='all'?rounds:rounds.filter(r=>r.course===courseFilter);
-                if(filtered.length===0) return <div style={{textAlign:'center',padding:'32px 20px',color:'rgba(245,240,232,0.4)',fontSize:13}}>No rounds found for this course.</div>;
+                if(filtered.length===0) return <div style={{textAlign:'center',padding:'32px 20px',color:'rgba(245,240,232,0.4)',fontSize:13}}>No rounds found for this course</div>;
                 return filtered.map((r,i)=>(
                   <div key={r.id} style={S.roundItem(courseFilter==='all'&&i>=12)}>
                     <div style={S.roundScore}>{r.score}</div>
@@ -1015,7 +1629,7 @@ export default function GolfHandicapApp() {
             });
             const profile = await res.json();
             if (res.ok && profile?.name) {
-              setAuthUser({ id: s.user.id, name: profile.name, email: s.user.email, memberNumber: profile.member_number, createdAt: profile.created_at });
+              setAuthUser({ id: s.user.id, name: profile.name, lastName: profile.last_name || '', email: profile.email || s.user.email, memberNumber: profile.member_number, createdAt: profile.created_at });
             }
           }
         }
