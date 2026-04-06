@@ -176,7 +176,7 @@ function AuthScreen({ onAuth }) {
 
   const Header = () => (
     <div style={S.top}>
-      <div style={S.title}>The Modern Index</div>
+      <div style={S.title}>Down The Middle</div>
       <div style={S.sub}>A More Honest Golf Handicap</div>
       <div style={S.divider} />
     </div>
@@ -286,7 +286,7 @@ function AuthScreen({ onAuth }) {
         body: JSON.stringify({
           name: profile.name,
           email: email.trim().toLowerCase(),
-          message: `Your Modern Index member number is: ${profile.member_number}`,
+          message: `Your Down The Middle member number is: ${profile.member_number}`,
         }),
       });
       setMessage('Your member # has been sent to that email address');
@@ -299,7 +299,7 @@ function AuthScreen({ onAuth }) {
       <style>{globalStyles}</style>
       <div style={S.body}>
         <div style={{textAlign:'center', marginBottom:40, marginTop:48}}>
-          <div style={{fontSize:28, fontWeight:900, color:'#f5f0e8', letterSpacing:5, textTransform:'uppercase', lineHeight:1.1, marginBottom:14}}>The Modern Index</div>
+          <div style={{fontSize:28, fontWeight:900, color:'#f5f0e8', letterSpacing:5, textTransform:'uppercase', lineHeight:1.1, marginBottom:14}}>Down The Middle</div>
           <div style={{fontSize:12, fontWeight:700, color:'#e02247', letterSpacing:3, textTransform:'uppercase'}}>A More Honest Golf Handicap</div>
         </div>
         <div style={{height:1, background:'rgba(201,168,76,0.25)', margin:'0 0 24px'}}/>
@@ -357,7 +357,7 @@ function AuthScreen({ onAuth }) {
       <style>{globalStyles}</style>
       <div style={{flex:1, display:'flex', flexDirection:'column', justifyContent:'center', padding:'40px 28px'}}>
         <div style={{marginBottom:36, textAlign:'center'}}>
-          <div style={{fontSize:24, fontWeight:800, color:'#fff', textTransform:'uppercase', letterSpacing:3, marginBottom:4}}>The Modern Index</div>
+          <div style={{fontSize:24, fontWeight:800, color:'#fff', textTransform:'uppercase', letterSpacing:3, marginBottom:4}}>Down The Middle</div>
           <div style={{fontSize:9, fontWeight:500, letterSpacing:3, textTransform:'uppercase', color:'#e02247'}}>A More Honest Golf Handicap</div>
         </div>
         <div style={{height:1, background:'rgba(201,168,76,0.25)', marginBottom:36}}/>
@@ -1345,7 +1345,7 @@ function AppContent({ user, onSignOut }) {
           </button>
           <div className="avatar-tooltip">Account</div>
         </div>
-        <div style={S.headerMain}>THE MODERN INDEX</div>
+        <div style={S.headerMain}>DOWN THE MIDDLE</div>
         <div style={S.headerSub}>A More Honest Golf Handicap</div>
         <div style={{height:1,background:'rgba(201,168,76,0.25)',margin:'0 0 8px 0'}}/>
         <div style={{display:'flex',width:'100%',gap:4}}>
