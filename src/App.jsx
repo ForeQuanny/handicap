@@ -260,7 +260,7 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
       <style>{globalStyles}</style>
       <div style={{padding:'36px 20px 0',textAlign:'center'}}>
         <div style={{fontSize:27,fontWeight:900,color:'#f5f0e8',textTransform:'uppercase',letterSpacing:5.5,lineHeight:1.1,marginBottom:0,whiteSpace:'nowrap',fontFamily:'Verdana,sans-serif'}}>Down The Middle</div>
-        <div style={{fontSize:15,fontWeight:700,letterSpacing:3.75,textTransform:'uppercase',color:'#e02247',marginTop:5.5,marginLeft:-4.5,fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
+        <div style={{fontSize:15,fontWeight:700,letterSpacing:3.75,textTransform:'uppercase',color:'#e02247',marginTop:5.5,marginLeft:-6.5,fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
         <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'28px 0 0'}} />
       </div>
       <div style={{padding:'28px 24px',flex:1,display:'flex',flexDirection:'column',gap:28}}>
@@ -294,7 +294,7 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
       <style>{globalStyles}</style>
       <div style={{background:'linear-gradient(180deg,#0d1b2e 0%,#0d1b2e 100%)',padding:'36px 20px 20px',textAlign:'center'}}>
         <div style={{fontSize:27,fontWeight:900,color:'#f5f0e8',textTransform:'uppercase',letterSpacing:5.5,lineHeight:1.1,marginBottom:0,whiteSpace:'nowrap',fontFamily:'Verdana,sans-serif'}}>Down The Middle</div>
-        <div style={{fontSize:15,fontWeight:700,letterSpacing:3.75,textTransform:'uppercase',color:'#e02247',marginTop:5.5,marginLeft:-4.5,fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
+        <div style={{fontSize:15,fontWeight:700,letterSpacing:3.75,textTransform:'uppercase',color:'#e02247',marginTop:5.5,marginLeft:-6.5,fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
         <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'28px 0 0'}} />
       </div>
       <div style={{padding:'28px 24px',flex:1,display:'flex',flexDirection:'column'}}>
@@ -431,7 +431,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
     wrap: { maxWidth:430, margin:'0 auto', minHeight:'100dvh', background:'#0d1b2e', color:'#f5f0e8', display:'flex', flexDirection:'column' },
     top: { background:'linear-gradient(180deg,#0d1b2e 0%,#0d1b2e 100%)', padding:'36px 20px 20px', textAlign:'center' },
     title: { fontSize:27, fontWeight:900, color:'#f5f0e8', textTransform:'uppercase', letterSpacing:5.5, lineHeight:1.1, marginBottom:0, whiteSpace:'nowrap', fontFamily:'Verdana,sans-serif' },
-    sub: { fontSize:15, fontWeight:700, letterSpacing:3.75, textTransform:'uppercase', color:'#e02247', marginTop:5.5, marginLeft:-4.5, fontFamily:'Verdana,sans-serif' },
+    sub: { fontSize:15, fontWeight:700, letterSpacing:3.75, textTransform:'uppercase', color:'#e02247', marginTop:5.5, marginLeft:-6.5, fontFamily:'Verdana,sans-serif' },
     divider: { height:2, background:'rgba(201,168,76,0.45)', margin:'28px 0 0' },
     body: { padding:'28px 24px', flex:1 },
     label: { fontSize:9, fontWeight:700, letterSpacing:3, textTransform:'uppercase', color:'rgba(201,168,76,0.75)', marginBottom:6, display:'block', paddingLeft:2 },
@@ -775,7 +775,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
       <div style={{flex:1, display:'flex', flexDirection:'column', justifyContent:'flex-start', padding:'32px 28px 40px'}}>
         <div style={{marginBottom:0, textAlign:'center'}}>
           <div style={{fontSize:27, fontWeight:900, color:'#f5f0e8', letterSpacing:5.5, textTransform:'uppercase', lineHeight:1.1, marginBottom:0, whiteSpace:'nowrap', fontFamily:'Verdana,sans-serif'}}>Down The Middle</div>
-          <div style={{fontSize:15, fontWeight:700, letterSpacing:3.75, textTransform:'uppercase', color:'#e02247', marginTop:5.5, marginLeft:-4.5, fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
+          <div style={{fontSize:15, fontWeight:700, letterSpacing:3.75, textTransform:'uppercase', color:'#e02247', marginTop:5.5, marginLeft:-6.5, fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
         </div>
         <div style={{height:2, background:'rgba(201,168,76,0.45)', margin:'24px 0 20px'}}/>
         <div style={{display:'flex', flexDirection:'column', gap:22}}>
@@ -3139,7 +3139,7 @@ export default function GolfHandicapApp() {
       <div style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'flex-start',padding:'32px 28px 40px'}}>
         <div style={{marginBottom:0,textAlign:'center'}}>
           <div style={{fontSize:27,fontWeight:900,color:'#f5f0e8',letterSpacing:5.5,textTransform:'uppercase',lineHeight:1.1,marginBottom:0,whiteSpace:'nowrap',fontFamily:'Verdana,sans-serif'}}>Down The Middle</div>
-          <div style={{fontSize:15,fontWeight:700,letterSpacing:3.75,textTransform:'uppercase',color:'#e02247',marginTop:5.5,marginLeft:-4.5,fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
+          <div style={{fontSize:15,fontWeight:700,letterSpacing:3.75,textTransform:'uppercase',color:'#e02247',marginTop:5.5,marginLeft:-6.5,fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
         </div>
         <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'24px 0 20px'}}/>
         <div style={{display:'flex',flexDirection:'column',gap:22}}>
