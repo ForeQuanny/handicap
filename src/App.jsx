@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import { Browser } from "@capacitor/browser";
 import { App as CapApp } from "@capacitor/app";
-import { CapacitorPurchases } from '@capgo/capacitor-purchases';
+import { Purchases } from '@revenuecat/purchases-capacitor';
 
 const SUPABASE_URL = "https://euwqnyzzrxrmldmfspjr.supabase.co";
 const API_BASE = "https://app.dtmhandicap.com";
@@ -129,41 +129,89 @@ function calcHandicapAllTime(rounds) {
 }
 
 // ─── Checkout Redirect ─────────────────────────────────────────────────────────
-function CheckoutRedirect({ session, handleSignOut, user, onReactivated }) {
+function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativePurchaseSuccess }) {
   const [reactivating, setReactivating] = useState(false);
   const [iapError, setIapError] = useState('');
   const isNative = window.Capacitor?.isNativePlatform?.();
-  const isLapsed = user && user.memberNumber && user.stripeCustomerId;
+  const isLapsed = user && user.memberNumber && (user.stripeCustomerId || user.paymentProvider === 'apple');
 
   // ── Native IAP purchase ──────────────────────────────────────────────────────
-  const handleIAPPurchase = async () => {
+  const handleIAPPurchaseInternal = async (silent = false) => {
     if (reactivating) return;
     setReactivating(true);
     setIapError('');
     try {
-      const { offerings } = await CapacitorPurchases.getOfferings();
+      const offerings = await Purchases.getOfferings();
       const currentOffering = offerings?.current;
       const pkg = currentOffering?.annual;
-      if (!pkg) { setIapError('Unable to load membership — please try again.'); setReactivating(false); return; }
-      const { customerInfo } = await CapacitorPurchases.purchasePackage({
-        identifier: pkg.identifier,
-        offeringIdentifier: currentOffering.identifier,
-      });
+      if (!pkg) { if (!silent) setIapError('Unable to load membership — please try again.'); setReactivating(false); return; }
+      const { customerInfo } = await Purchases.purchasePackage({ aPackage: pkg });
       const renewsAt = customerInfo.latestExpirationDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
       const savedSession = JSON.parse(localStorage.getItem('sb-session') || 'null');
+      let updatedUser = { ...user, subscribed: true, paymentProvider: 'apple', subscriptionRenewsAt: renewsAt };
       if (savedSession?.access_token) {
         await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${savedSession.access_token}` },
           body: JSON.stringify({ subscribed: true, payment_provider: 'apple', subscription_renews_at: renewsAt }),
         });
+        try {
+          const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}&select=*`, {
+            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${savedSession.access_token}`, 'Accept': 'application/vnd.pgrst.object+json' }
+          });
+          if (profRes.ok) {
+            const profile = await profRes.json();
+            updatedUser = { id: user.id, name: profile.name || user.name, lastName: profile.last_name || user.lastName, email: profile.email || user.email, memberNumber: profile.member_number || user.memberNumber, createdAt: profile.created_at || user.createdAt, subscribed: true, subscriptionRenewsAt: renewsAt, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: 'apple' };
+          }
+        } catch {}
       }
-      onReactivated?.({ ...user, subscribed: true, paymentProvider: 'apple', subscriptionRenewsAt: renewsAt });
+      if (onNativePurchaseSuccess) {
+        onNativePurchaseSuccess(updatedUser);
+      } else {
+        onReactivated?.(updatedUser);
+      }
     } catch (e) {
-      if (e?.code !== 'PURCHASE_CANCELLED') setIapError('Purchase failed — please try again.');
+      const cancelled = e?.code === 'PURCHASE_CANCELLED' || e?.code === 2 || e?.userCancelled === true || String(e?.message || '').toLowerCase().includes('cancel');
+      if (!cancelled && !silent) {
+        const detail = [e?.readableErrorCode, e?.code != null ? `(${e.code})` : '', e?.message || e?.underlyingErrorMessage].filter(Boolean).join(' ');
+        setIapError(detail || 'Purchase failed — please try again.');
+      }
       setReactivating(false);
     }
   };
+  const handleIAPPurchase = () => handleIAPPurchaseInternal(false);
+
+  // ── Native: on mount, silently sync if already subscribed in RevenueCat ────────
+  useEffect(() => {
+    if (!isNative) return;
+    (async () => {
+      try {
+        const { customerInfo } = await Purchases.getCustomerInfo();
+        const hasActiveSub = (customerInfo.activeSubscriptions?.length ?? 0) > 0;
+        if (!hasActiveSub) return;
+        const renewsAt = customerInfo.latestExpirationDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+        const savedSession = JSON.parse(localStorage.getItem('sb-session') || 'null');
+        let syncedUser = { ...user, subscribed: true, paymentProvider: 'apple', subscriptionRenewsAt: renewsAt };
+        if (savedSession?.access_token) {
+          await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${savedSession.access_token}` },
+            body: JSON.stringify({ subscribed: true, payment_provider: 'apple', subscription_renews_at: renewsAt }),
+          });
+          try {
+            const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}&select=*`, {
+              headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${savedSession.access_token}`, 'Accept': 'application/vnd.pgrst.object+json' }
+            });
+            if (profRes.ok) {
+              const profile = await profRes.json();
+              syncedUser = { id: user.id, name: profile.name || user.name, lastName: profile.last_name || user.lastName, email: profile.email || user.email, memberNumber: profile.member_number || user.memberNumber, createdAt: profile.created_at || user.createdAt, subscribed: true, subscriptionRenewsAt: renewsAt, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: 'apple' };
+            }
+          } catch {}
+        }
+        onReactivated?.(syncedUser);
+      } catch {}
+    })();
+  }, []);
 
   // ── Web: poll Supabase on return from Stripe ─────────────────────────────────
   useEffect(() => {
@@ -206,26 +254,36 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated }) {
     go();
   }, []);
 
-  // ── Native: show reactivation UI with IAP button ─────────────────────────────
+  // ── Native: subscription page ────────────────────────────────────────────────
   if (isNative) return (
     <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
       <style>{globalStyles}</style>
-      <div style={{background:'linear-gradient(180deg,#0d1b2e 0%,#0d1b2e 100%)',padding:'36px 20px 20px',textAlign:'center'}}>
+      <div style={{padding:'36px 20px 0',textAlign:'center'}}>
         <div style={{fontSize:27,fontWeight:900,color:'#f5f0e8',textTransform:'uppercase',letterSpacing:5.5,lineHeight:1.1,marginBottom:0,whiteSpace:'nowrap',fontFamily:'Verdana,sans-serif'}}>Down The Middle</div>
         <div style={{fontSize:15,fontWeight:700,letterSpacing:3.75,textTransform:'uppercase',color:'#e02247',marginTop:5.5,marginLeft:-4.5,fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
         <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'28px 0 0'}} />
       </div>
-      <div style={{padding:'28px 24px',flex:1,display:'flex',flexDirection:'column'}}>
-        <div style={{textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:12}}>
-          <div style={{fontSize:13,fontWeight:700,letterSpacing:2,textTransform:'uppercase',color:'#e8b84b'}}>{user.name ? `Welcome Back, ${user.name}` : 'Welcome'}</div>
-          <div style={{fontSize:13,color:'#f5f0e8',lineHeight:1.7}}>Your membership is currently inactive.</div>
-          <div style={{fontSize:13,color:'#f5f0e8',lineHeight:1.7}}>Please reactivate it now to access Down The Middle.</div>
-          {iapError ? <div style={{fontSize:11,color:'#e02247',letterSpacing:0.5}}>{iapError}</div> : null}
-          <button onClick={handleIAPPurchase} disabled={reactivating} className="auth-btn-primary" style={{marginTop:16,width:'100%',padding:'13px 0',background:'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:3,color:'#0d1b2e',fontSize:11,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',opacity:reactivating?0.6:1}}>
-            {reactivating ? 'Processing...' : 'Reactivate Membership'}
-          </button>
-          <button onClick={handleSignOut} style={{background:'none',border:'none',color:'rgba(201,168,76,0.6)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer',marginTop:12}}>Log Out</button>
+      <div style={{padding:'28px 24px',flex:1,display:'flex',flexDirection:'column',gap:28}}>
+        <div style={{display:'flex',justifyContent:'center'}}>
+          <div style={{display:'flex',flexDirection:'column',gap:18}}>
+            {['Handicap tracking','Unlimited rounds','Scoring analytics','Social','$49.99/year'].map(f => (
+              <div key={f} style={{display:'flex',alignItems:'center',gap:14,fontSize:16,color:'#f5f0e8'}}>
+                <span style={{color:'#e8b84b',fontSize:16,fontWeight:700,flexShrink:0,lineHeight:1}}>✓</span>
+                {f}
+              </div>
+            ))}
+          </div>
         </div>
+        {iapError ? <div style={{fontSize:11,color:'#e02247',letterSpacing:0.5,textAlign:'center'}}>{iapError}</div> : null}
+        <button onClick={handleIAPPurchase} disabled={reactivating} style={{width:'100%',padding:'15px 0',background:reactivating?'rgba(201,168,76,0.4)':'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:4,color:'#0d1b2e',fontSize:13,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:reactivating?'default':'pointer',marginTop:16}}>
+          {reactivating ? 'Processing...' : (isLapsed ? 'Reactivate Membership' : 'Start Membership')}
+        </button>
+        <div style={{fontSize:10,color:'rgba(245,240,232,0.3)',textAlign:'center',lineHeight:1.7}}>
+          Payment charged to your Apple ID. Renews automatically<br/>unless cancelled at least 24 hours before the end of the period.
+        </div>
+      </div>
+      <div style={{padding:'24px 28px 44px',textAlign:'center'}}>
+        <button onClick={handleSignOut} style={{background:'none',border:'none',color:'rgba(201,168,76,0.45)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Exit</button>
       </div>
     </div>
   );
@@ -1399,7 +1457,7 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
                 onClick={async () => {
                   setPortalLoading(true);
                   try {
-                    const { customerInfo } = await CapacitorPurchases.restorePurchases();
+                    const { customerInfo } = await Purchases.restorePurchases();
                     const isActive = customerInfo?.activeSubscriptions?.length > 0;
                     if (isActive) {
                       const renewsAt = customerInfo.latestExpirationDate || null;
@@ -2701,7 +2759,7 @@ export default function GolfHandicapApp() {
 
   useEffect(() => {
     if (!window.Capacitor?.isNativePlatform?.()) return;
-    CapacitorPurchases.setup({ apiKey: RC_API_KEY });
+    Purchases.configure({ apiKey: RC_API_KEY });
     let listener;
     const handleVerifiedUrl = async (url) => {
       try {
@@ -2709,16 +2767,18 @@ export default function GolfHandicapApp() {
         const token = decodeURIComponent(params.get('token') || '');
         const userId = decodeURIComponent(params.get('userId') || '');
         if (!token || !userId) return;
-        const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`, {
-          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.pgrst.object+json' }
-        });
-        const profile = await profRes.json();
-        if (profRes.ok && profile?.name) {
-          localStorage.setItem('sb-session', JSON.stringify({ access_token: token, user: { id: userId } }));
-          await CapacitorPurchases.logIn({ appUserID: userId }).catch(() => {});
-          setAuthUser({ id: userId, name: profile.name, lastName: profile.last_name || '', email: profile.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: profile.subscribed || false, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null });
-          setAuthLoading(false);
-        }
+        localStorage.setItem('sb-session', JSON.stringify({ access_token: token, user: { id: userId } }));
+        let profile = null;
+        try {
+          const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`, {
+            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.pgrst.object+json' }
+          });
+          if (profRes.ok) profile = await profRes.json();
+        } catch {}
+        await Purchases.logIn({ appUserID: userId }).catch(() => {});
+        setForceLogin(false);
+        setAuthUser({ id: userId, name: profile?.name || '', lastName: profile?.last_name || '', email: profile?.email || '', memberNumber: profile?.member_number || null, createdAt: profile?.created_at || null, subscribed: profile?.subscribed || false, subscriptionRenewsAt: profile?.subscription_renews_at || null, stripeCustomerId: profile?.stripe_customer_id || null, paymentProvider: profile?.payment_provider || null });
+        setAuthLoading(false);
       } catch {}
     };
     const handleReactivationUrl = async () => {
@@ -2893,8 +2953,8 @@ export default function GolfHandicapApp() {
             });
             const profile = await profRes.json();
             window.history.replaceState(null, '', window.location.pathname);
-            // Save session regardless of profile state
-            const session = { access_token: accessToken, user: userData };
+            // Save session with refresh_token so retries work past the 1-hour access token expiry
+            const session = { access_token: accessToken, refresh_token: exchangeData.refresh_token || null, expires_at: exchangeData.expires_in ? Math.floor(Date.now()/1000) + exchangeData.expires_in : null, user: userData };
             localStorage.setItem('sb-session', JSON.stringify(session));
             if (profRes.ok && profile?.name && profile.subscribed) {
               // Already paid — go straight to app
@@ -2905,7 +2965,9 @@ export default function GolfHandicapApp() {
             }
             // Email confirmed but not paid — on iPhone redirect to native app for IAP, else Stripe
             if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-              window.location.href = `dtmhandicap://verified?token=${encodeURIComponent(accessToken)}&userId=${encodeURIComponent(userData.id)}`;
+              const _deepLink = `dtmhandicap://verified?token=${encodeURIComponent(accessToken)}&userId=${encodeURIComponent(userData.id)}`;
+              window.location.href = _deepLink;
+              setTimeout(() => { document.open(); document.write('<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#0d1b2e;min-height:100vh}</style></head><body></body></html>'); document.close(); }, 500);
               return;
             }
             try {
@@ -2962,7 +3024,9 @@ export default function GolfHandicapApp() {
                 window.history.replaceState(null, '', window.location.pathname);
                 if (!profile.subscribed) {
                   if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-                    window.location.href = `dtmhandicap://verified?token=${encodeURIComponent(accessToken)}&userId=${encodeURIComponent(userData.id)}`;
+                    const _deepLink = `dtmhandicap://verified?token=${encodeURIComponent(accessToken)}&userId=${encodeURIComponent(userData.id)}`;
+                    window.location.href = _deepLink;
+                    setTimeout(() => { document.open(); document.write('<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#0d1b2e;min-height:100vh}</style></head><body></body></html>'); document.close(); }, 500);
                     return;
                   }
                   try {
@@ -2990,13 +3054,39 @@ export default function GolfHandicapApp() {
         const raw = localStorage.getItem("sb-session");
         if (raw) {
           const s = JSON.parse(raw);
-          if (s?.access_token && (!s.expires_at || Date.now() / 1000 < s.expires_at)) {
-            const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${s.user.id}&select=*`, {
-              headers: { ...restHeaders(), "Accept": "application/vnd.pgrst.object+json" }
-            });
-            const profile = await res.json();
-            if (res.ok && profile?.name) {
-              setAuthUser({ id: s.user.id, name: profile.name, lastName: profile.last_name || '', email: profile.email || s.user.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: profile.subscribed || false, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null });
+          if (s?.access_token) {
+            let token = s.access_token;
+            // Refresh if expired and we have a refresh_token — no time limit on retries
+            const isExpired = s.expires_at && Date.now()/1000 >= s.expires_at;
+            if (isExpired && s.refresh_token) {
+              try {
+                const rr = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+                  body: JSON.stringify({ refresh_token: s.refresh_token })
+                });
+                if (rr.ok) {
+                  const rd = await rr.json();
+                  token = rd.access_token;
+                  localStorage.setItem('sb-session', JSON.stringify({ access_token: rd.access_token, refresh_token: rd.refresh_token || s.refresh_token, expires_at: rd.expires_in ? Math.floor(Date.now()/1000) + rd.expires_in : null, user: s.user }));
+                }
+              } catch {}
+            }
+            if (!isExpired || token !== s.access_token) {
+              const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${s.user.id}&select=*`, {
+                headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.pgrst.object+json' }
+              });
+              const profile = await res.json();
+              if (res.ok && profile?.id) {
+                // iPhone + unsubscribed in web Safari → send to native app (handles retries on second verify tap)
+                if (!profile.subscribed && !window.Capacitor?.isNativePlatform?.() && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
+                  const _dl = `dtmhandicap://verified?token=${encodeURIComponent(token)}&userId=${encodeURIComponent(s.user.id)}`;
+                  window.location.href = _dl;
+                  setTimeout(() => { document.open(); document.write('<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#0d1b2e;min-height:100vh}</style></head><body></body></html>'); document.close(); }, 500);
+                  return;
+                }
+                setAuthUser({ id: s.user.id, name: profile.name || '', lastName: profile.last_name || '', email: profile.email || s.user.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: profile.subscribed || false, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null });
+              }
             }
           }
         }
@@ -3013,7 +3103,7 @@ export default function GolfHandicapApp() {
         await fetch(`${SUPABASE_URL}/auth/v1/logout`, { method: "POST", headers: restHeaders() });
       }
     } catch {}
-    if (window.Capacitor?.isNativePlatform?.()) { try { await CapacitorPurchases.logOut(); } catch {} }
+    if (window.Capacitor?.isNativePlatform?.()) { try { await Purchases.logOut(); } catch {} }
     localStorage.removeItem("sb-session");
     setVerifiedEmail(null);
     setVerifiedUser(null);
@@ -3022,7 +3112,7 @@ export default function GolfHandicapApp() {
     setAuthUser(null);
   };
   const handleAccountDeleted = () => {
-    if (window.Capacitor?.isNativePlatform?.()) { try { CapacitorPurchases.logOut(); } catch {} }
+    if (window.Capacitor?.isNativePlatform?.()) { try { Purchases.logOut(); } catch {} }
     localStorage.removeItem("sb-session");
     setVerifiedEmail(null);
     setVerifiedUser(null);
@@ -3033,7 +3123,7 @@ export default function GolfHandicapApp() {
 
   useEffect(() => {
     if (!authUser?.id || !window.Capacitor?.isNativePlatform?.()) return;
-    CapacitorPurchases.logIn({ appUserID: authUser.id }).catch(() => {});
+    Purchases.logIn({ appUserID: authUser.id }).catch(() => {});
   }, [authUser?.id]);
 
   if (authLoading) return (
@@ -3069,7 +3159,9 @@ export default function GolfHandicapApp() {
             if (isIOS && !isNative) {
               window.location.href = `dtmhandicap://app?memberNumber=${welcomeUser.memberNumber}`;
             } else {
-              setPreFillMemberNumber(welcomeUser.memberNumber); setWelcomeUser(null); setForceLogin(true);
+              setPreFillMemberNumber(welcomeUser.memberNumber);
+              setWelcomeUser(null);
+              setAuthUser(null);
             }
           }}>
             Get Started
@@ -3088,7 +3180,7 @@ export default function GolfHandicapApp() {
   if (!authUser.subscribed) return (
     <div style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',alignItems:'center',justifyContent:'center'}}>
       <style>{globalStyles}</style>
-      <CheckoutRedirect session={JSON.parse(localStorage.getItem('sb-session')||'null')} handleSignOut={handleSignOut} user={authUser} onReactivated={setAuthUser} />
+      <CheckoutRedirect session={JSON.parse(localStorage.getItem('sb-session')||'null')} handleSignOut={handleSignOut} user={authUser} onReactivated={setAuthUser} onNativePurchaseSuccess={(u) => { setAuthUser(u); setWelcomeUser(u); }} />
     </div>
   );
   return (
