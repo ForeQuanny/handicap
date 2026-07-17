@@ -1,0 +1,14 @@
+{
+  "appId": "com.dtmhandicap.app",
+  "appName": "DownTheMiddle",
+  "webDir": "dist",
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 800,
+      "launchAutoHide": true,
+      "backgroundColor": "#0d1b2e",
+      "androidSplashResourceName": "splash",
+      "showSpinner": false
+    }
+  }
+}
