@@ -1677,7 +1677,7 @@ if (subPanel === 'account' && showDeleteForm) return (
         <div style={{padding:'28px 20px',flex:1,overflowY:'auto'}}>
           <div style={{display:'flex',flexDirection:'column',gap:16}}>
             <div style={{fontSize:13,color:'rgba(245,240,232,0.7)',lineHeight:1.8,letterSpacing:0.3}}>
-              {user?.paymentProvider==='apple'?'This action is permanent and cannot be undone. Deleting your account does not automatically cancel your membership, you must do so in the App Store.':<>This action is permanent and cannot be undone.<br/>It will also cancel any active membership that you have.</>}
+              {user?.paymentProvider==='apple'?<>This action is permanent and cannot be undone.<br/>Deleting your account does not automatically cancel your membership, you must do so in the App Store.</>:<>This action is permanent and cannot be undone.<br/>It will also cancel any active membership that you have.</>}
             </div>
             <button onClick={()=>{setShowDeleteModal(true);setDeleteConfirmText('');setDeleteError('');}} className="signout-btn" style={{width:'100%',padding:11,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>
               Delete Account
