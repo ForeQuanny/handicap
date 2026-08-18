@@ -471,15 +471,17 @@ function MemberNumberInput({ value, onChange, inputStyle }) {
 }
 
 // ─── Auth Screen ───────────────────────────────────────────────────────────────
-function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogin, onForceLoginClear, onResetComplete, fromEmailLink, onEmailLinkClear, onShowAppBanner, reactivationReturn, onReactivationDismiss, preFillMemberNumber, preFillNonce }) {
+function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogin, onForceLoginClear, forceSignup, onForceSignupClear, onResetComplete, fromEmailLink, onEmailLinkClear, onShowAppBanner, reactivationReturn, onReactivationDismiss, preFillMemberNumber, preFillNonce }) {
   const [mode, setMode] = useState(() => {
     if (resetToken) return 'resetPassword';
+    if (forceSignup) return 'signup';
     if (forceLogin) return 'login';
     const p = new URLSearchParams(window.location.search);
     if (p.get('screen') === 'login') { window.history.replaceState(null, '', window.location.pathname); return 'login'; }
     if (p.get('screen') === 'signup') { window.history.replaceState(null, '', window.location.pathname); return 'signup'; }
     return verifiedEmail ? 'login' : 'landing';
   });
+  useEffect(() => { if (forceSignup) { setMode('signup'); onForceSignupClear?.(); } }, [forceSignup]);
   useEffect(() => { if (forceLogin) { setMode('login'); onForceLoginClear && onForceLoginClear(); } }, [forceLogin]);
   useEffect(() => { if (resetToken) setMode('resetPassword'); }, [resetToken]);
   const showOpenInApp = fromEmailLink && /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -2960,6 +2962,7 @@ export default function GolfHandicapApp() {
   const [verifiedEmail, setVerifiedEmail] = useState(null);
   const [verifiedUser, setVerifiedUser] = useState(null);
   const [forceLogin, setForceLogin] = useState(false);
+  const [forceSignup, setForceSignup] = useState(false);
   const [preFillMemberNumber, setPreFillMemberNumber] = useState('');
   const [preFillNonce, setPreFillNonce] = useState(0);
   const [fromEmailLink, setFromEmailLink] = useState(false);
@@ -3103,9 +3106,11 @@ export default function GolfHandicapApp() {
       else if (result.url.includes('reset?token')) handleResetUrl(result.url);
       else {
         if (dispatchUniversalUrl(result.url)) return;
-        const mn = new URLSearchParams(result.url.split('?')[1] || '').get('memberNumber');
+        const params = new URLSearchParams(result.url.split('?')[1] || '');
+        const mn = params.get('memberNumber');
         if (mn) { setPreFillMemberNumber(mn); setPreFillNonce(n => n + 1); skipSessionRestore.current = true; }
-        setForceLogin(true);
+        skipSessionRestore.current = true;
+        if (params.get('screen') === 'signup') { setForceSignup(true); } else { setForceLogin(true); }
         setAuthLoading(false);
       }
     }).catch(() => {});
@@ -3116,9 +3121,10 @@ export default function GolfHandicapApp() {
       else if (data.url?.includes('reset?token')) handleResetUrl(data.url);
       else {
         if (dispatchUniversalUrl(data.url)) return;
-        const mn = new URLSearchParams(data.url?.split('?')[1] || '').get('memberNumber');
+        const params = new URLSearchParams(data.url?.split('?')[1] || '');
+        const mn = params.get('memberNumber');
         if (mn) { setPreFillMemberNumber(mn); setPreFillNonce(n => n + 1); setAuthUser(null); setWelcomeUser(null); }
-        setForceLogin(true);
+        if (params.get('screen') === 'signup') { setAuthUser(null); setWelcomeUser(null); setForceSignup(true); } else { setForceLogin(true); }
       }
     }).then(l => { listener = l; }).catch(() => {});
     return () => { listener?.remove(); };
@@ -3503,7 +3509,7 @@ export default function GolfHandicapApp() {
       </div>
     </div>
   );
-  if (!authUser) return <AuthScreen onAuth={setAuthUser} verifiedEmail={verifiedEmail} verifiedUser={verifiedUser} resetToken={resetToken} forceLogin={forceLogin} onForceLoginClear={() => setForceLogin(false)} onResetComplete={() => { sessionStorage.removeItem('dtm-reset-token'); setResetToken(null); }} fromEmailLink={fromEmailLink} onEmailLinkClear={() => setFromEmailLink(false)} onShowAppBanner={() => setFromEmailLink(true)} reactivationReturn={reactivationReturn} onReactivationDismiss={() => setReactivationReturn(false)} preFillMemberNumber={preFillMemberNumber} preFillNonce={preFillNonce} />;
+  if (!authUser) return <AuthScreen onAuth={setAuthUser} verifiedEmail={verifiedEmail} verifiedUser={verifiedUser} resetToken={resetToken} forceLogin={forceLogin} onForceLoginClear={() => setForceLogin(false)} forceSignup={forceSignup} onForceSignupClear={() => setForceSignup(false)} onResetComplete={() => { sessionStorage.removeItem('dtm-reset-token'); setResetToken(null); }} fromEmailLink={fromEmailLink} onEmailLinkClear={() => setFromEmailLink(false)} onShowAppBanner={() => setFromEmailLink(true)} reactivationReturn={reactivationReturn} onReactivationDismiss={() => setReactivationReturn(false)} preFillMemberNumber={preFillMemberNumber} preFillNonce={preFillNonce} />;
   // SUBSCRIPTION GATE — re-enabled for live payments.
   if (!authUser.subscribed) return (
     <div style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',alignItems:'center',justifyContent:'center'}}>
