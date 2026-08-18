@@ -929,7 +929,6 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
         onResetComplete();
         clearFields();
         setMode('login');
-        if (/iPhone|iPad|iPod/.test(navigator.userAgent) && !window.Capacitor?.isNativePlatform?.()) onShowAppBanner?.();
       } catch { setError('Something went wrong'); }
       setLoading(false);
     };
