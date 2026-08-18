@@ -912,7 +912,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
           body: JSON.stringify({ password }),
         });
         const data = await res.json();
-        if (!res.ok) { setLoading(false); return setError(data.message || 'Failed to reset password'); }
+        if (!res.ok) { setLoading(false); const isSamePw = data.code === 'same_password' || String(data.message || '').toLowerCase().includes('different'); return setError(isSamePw ? 'Please choose a different password' : (data.message || 'Failed to reset password')); }
         // Send confirmation email
         try {
           const userEmail = data.email || data.user_metadata?.email;
