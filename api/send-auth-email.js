@@ -13,9 +13,9 @@ function isRateLimited(key, maxRequests, windowMs) {
 }
 
 const headerHtml = `
-  <div style="text-align:center;margin-bottom:24px;">
+  <div style="text-align:center;margin-bottom:16px;">
     <h1 style="color:#f5f0e8;font-size:20px;font-weight:900;letter-spacing:3.75px;text-transform:uppercase;margin:0;font-family:Verdana,Geneva,sans-serif;">DOWN THE MIDDLE</h1>
-    <p style="color:#e02247;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin:5.5px 0 0;font-family:Verdana,Geneva,sans-serif;padding-right:8px;">A TRUER GOLF HANDICAP</p>
+    <p style="color:#e02247;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin:4px 0 0;font-family:Verdana,Geneva,sans-serif;padding-right:4px;">A TRUER GOLF HANDICAP</p>
   </div>
   <div style="height:1px;background:#e8b84b;margin:0 0 20px;"></div>
 `;
@@ -27,7 +27,7 @@ const wrapHtml = (content) => `
   </div>
 `;
 
-const loginLink = `<a href="https://app.dtmhandicap.com/login" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a>`;
+const loginLink = `<a href="https://app.dtmhandicap.com/open.html" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a>`;
 const loginText = `<p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:36px 0 0;">Log in ${loginLink}</p>`;
 
 export default async function handler(req, res) {
@@ -51,7 +51,7 @@ export default async function handler(req, res) {
           <span style="color:#e8b84b;font-size:24px;font-weight:900;letter-spacing:4px;text-decoration:none !important;pointer-events:none;font-family:system-ui,-apple-system,sans-serif;">${memberNumber.replace('-', '-\u200B')}</span>
         </div>
       </div>
-      ${loginText}
+      <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:36px 0 0;">Log in <a href="https://euwqnyzzrxrmldmfspjr.supabase.co/functions/v1/open-app?memberNumber=${encodeURIComponent(memberNumber)}" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a></p>
     `);
 
   } else if (type === 'password_reset') {
@@ -80,10 +80,17 @@ export default async function handler(req, res) {
     `);
 
   } else if (type === 'password_changed') {
-    subject = 'Password Reset ✅';
+    subject = 'Password Changed ✅';
     html = wrapHtml(`
-      <p style="color:#ffffff;font-size:14px;font-weight:400;line-height:1.8;margin:0;text-align:center;">Your password was reset successfully.</p>
-      ${loginText}
+      <p style="color:#ffffff;font-size:14px;font-weight:400;line-height:1.8;margin:0;text-align:center;">Your password has been changed successfully.</p>
+      <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:36px 0 0;">If you did not make this change, please contact <a href="mailto:support@dtmhandicap.com" style="color:#e8b84b;text-decoration:underline;">support@dtmhandicap.com</a></p>
+    `);
+
+  } else if (type === 'email_changed') {
+    subject = 'Email Address Updated ✅';
+    html = wrapHtml(`
+      <p style="color:#ffffff;font-size:14px;font-weight:400;line-height:1.8;margin:0;text-align:center;">Your email has been updated successfully.</p>
+      <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:36px 0 0;">If you did not make this change, please contact <a href="mailto:support@dtmhandicap.com" style="color:#e8b84b;text-decoration:underline;">support@dtmhandicap.com</a></p>
     `);
 
   } else if (type === 'partner_request') {
@@ -91,7 +98,15 @@ export default async function handler(req, res) {
     html = wrapHtml(`
       <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0 0 4px;text-align:center;word-break:break-word;">${requesterName} has requested</p>
       <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0;text-align:center;word-break:break-word;">to add you as a Playing Partner.</p>
-      <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:28px 0 0;">Log in and accept <a href="https://app.dtmhandicap.com/login" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a></p>
+      <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:28px 0 0;">Log in and accept <a href="https://euwqnyzzrxrmldmfspjr.supabase.co/functions/v1/open-app" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a></p>
+    `);
+
+  } else if (type === 'account_deleted') {
+    subject = 'Account Deleted';
+    html = wrapHtml(`
+      <style>.m-br{display:none;}@media only screen and (max-width:480px){.m-br{display:block!important;}}</style>
+      <p style="color:#ffffff;font-size:14px;font-weight:400;line-height:1.8;margin:0 0 12px;text-align:center;">Your Down The Middle account<br class="m-br"> has been permanently deleted.</p>
+      <p style="color:#e8b84b;font-size:13px;font-weight:400;line-height:1.8;margin:0;text-align:center;">Thank you for your membership.</p>
     `);
 
   } else {

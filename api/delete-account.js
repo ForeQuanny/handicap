@@ -37,14 +37,18 @@ export default async function handler(req, res) {
         const subRes = await fetch(`https://api.stripe.com/v1/subscriptions?customer=${profile.stripe_customer_id}&status=active&limit=10`, {
           headers: { 'Authorization': `Bearer ${STRIPE_SECRET_KEY}` }
         });
+        if (!subRes.ok) throw new Error(`Stripe list subscriptions failed: ${subRes.status}`);
         const subData = await subRes.json();
         for (const sub of (subData.data || [])) {
-          await fetch(`https://api.stripe.com/v1/subscriptions/${sub.id}`, {
+          const cancelRes = await fetch(`https://api.stripe.com/v1/subscriptions/${sub.id}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${STRIPE_SECRET_KEY}` }
           });
+          if (!cancelRes.ok) throw new Error(`Stripe cancel subscription failed: ${cancelRes.status}`);
         }
-      } catch {}
+      } catch (stripeErr) {
+        return res.status(500).json({ error: 'Failed to cancel Stripe subscription. Please try again.' });
+      }
     }
 
     // Delete user data across all tables
@@ -63,6 +67,14 @@ export default async function handler(req, res) {
       const err = await deleteRes.json().catch(() => ({}));
       return res.status(500).json({ error: 'Failed to delete auth account', detail: err });
     }
+
+    try {
+      await fetch(`https://app.dtmhandicap.com/api/send-auth-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'account_deleted', email: userData.email }),
+      });
+    } catch {}
 
     return res.status(200).json({ success: true });
   } catch (e) {

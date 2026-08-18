@@ -7,8 +7,6 @@ import { Purchases } from '@revenuecat/purchases-capacitor';
 const SUPABASE_URL = "https://euwqnyzzrxrmldmfspjr.supabase.co";
 const API_BASE = "https://app.dtmhandicap.com";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1d3FueXp6cnhybWxkbWZzcGpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1MzAwODMsImV4cCI6MjA5MDEwNjA4M30.4PWVQFOIx3yX7oMWvpO06_dqdrGLk0PGE77DstmpJO0";
-const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
-const APP_STORE_URL = 'https://apps.apple.com/app/id'; // TODO: fill in once App Store listing is live
 const RC_API_KEY = 'appl_CuzGSslMbEObJWALvLlNjJxPEnc';
 const IAP_PRODUCT_ID = 'com.dtmhandicap.membership.annual';
 
@@ -128,10 +126,26 @@ function calcHandicapAllTime(rounds) {
   return val === null ? null : Math.trunc(val);
 }
 
+function showVerifiedPage(deepLink) {
+  const html = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#0d1b2e;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:Verdana,Geneva,sans-serif;}.wrap{text-align:center;padding:40px 24px;max-width:360px;}h1{color:#f5f0e8;font-size:20px;font-weight:900;letter-spacing:3.75px;text-transform:uppercase;margin:0 0 6px;}.sub{color:#e02247;font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;margin:0;}.line{height:2px;background:rgba(201,168,76,0.45);margin:16px 0 28px;}.msg{color:rgba(245,240,232,0.75);font-size:14px;line-height:1.75;margin:0 0 28px;font-family:system-ui,sans-serif;letter-spacing:0.2px;}a.btn{display:block;background:linear-gradient(135deg,#e8b84b,#c49a30);color:#0d1b2e;font-size:12px;font-weight:900;letter-spacing:3px;text-transform:uppercase;padding:16px 24px;border-radius:4px;text-decoration:none;}</style></head><body><div class="wrap"><h1>Down The Middle</h1><p class="sub">A Truer Golf Handicap</p><div class="line"></div><p class="msg">Email verified! Tap the button below to open the app and complete your membership.</p><a class="btn" href="${deepLink}">Open DTM App</a></div></body></html>`;
+  document.open(); document.write(html); document.close();
+}
+
+function AppHeader() {
+  return (
+    <div style={{background:'linear-gradient(180deg,#0d1b2e 0%,#0d1b2e 100%)',padding:'36px 20px 20px',textAlign:'center'}}>
+      <div style={{fontSize:27,fontWeight:900,color:'#f5f0e8',textTransform:'uppercase',letterSpacing:5.5,lineHeight:1.1,marginBottom:0,whiteSpace:'nowrap',fontFamily:'Verdana,sans-serif'}}>Down The Middle</div>
+      <div style={{fontSize:15,fontWeight:700,letterSpacing:3.75,textTransform:'uppercase',color:'#e02247',marginTop:5.5,marginLeft:-5,fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
+      <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'16px 0 0'}}/>
+    </div>
+  );
+}
+
 // ─── Checkout Redirect ─────────────────────────────────────────────────────────
 function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativePurchaseSuccess }) {
   const [reactivating, setReactivating] = useState(false);
   const [iapError, setIapError] = useState('');
+  const [redirecting, setRedirecting] = useState(false);
   const isNative = window.Capacitor?.isNativePlatform?.();
   const isLapsed = user && user.memberNumber && (user.stripeCustomerId || user.paymentProvider === 'apple');
 
@@ -165,7 +179,7 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
           }
         } catch {}
       }
-      if (onNativePurchaseSuccess) {
+      if (onNativePurchaseSuccess && !isLapsed) {
         onNativePurchaseSuccess(updatedUser);
       } else {
         onReactivated?.(updatedUser);
@@ -234,56 +248,60 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
     return () => document.removeEventListener('visibilitychange', checkOnReturn);
   }, [isNative, isLapsed]);
 
-  // ── Web: auto-redirect new users to Stripe ───────────────────────────────────
+
+  // ── Native: lapsed Stripe user — poll after portal browser closes ────────────
   useEffect(() => {
-    if (isNative || isLapsed) return;
-    const go = async () => {
-      try {
-        if (session?.user) {
-          const res = await fetch(`${API_BASE}/api/create-checkout-session`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: session.user.email, userId: session.user.id }),
+    if (!isNative || !isLapsed || user?.paymentProvider !== 'stripe') return;
+    let listenerHandle;
+    (async () => {
+      listenerHandle = await Browser.addListener('browserFinished', async () => {
+        const savedSession = JSON.parse(localStorage.getItem('sb-session') || 'null');
+        if (!savedSession?.access_token) return;
+        try {
+          const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}&select=*`, {
+            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${savedSession.access_token}`, 'Accept': 'application/vnd.pgrst.object+json' }
           });
-          const data = await res.json();
-          if (data.url) window.location.href = data.url;
-          else handleSignOut();
-        } else { handleSignOut(); }
-      } catch { handleSignOut(); }
-    };
-    go();
+          const profile = await profRes.json();
+          if (profRes.ok && profile?.subscribed) {
+            onReactivated?.({ id: user.id, name: profile.name || user.name, lastName: profile.last_name || user.lastName, email: profile.email || user.email, memberNumber: profile.member_number || user.memberNumber, createdAt: profile.created_at || user.createdAt, subscribed: true, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || 'stripe' });
+          }
+        } catch {}
+      });
+    })();
+    return () => { listenerHandle?.remove(); };
   }, []);
 
-  // ── Native: subscription page ────────────────────────────────────────────────
-  if (isNative) return (
+  // ── Native: subscription page (Apple IAP — not for lapsed Stripe users) ───────
+  if (isNative && !(isLapsed && user?.paymentProvider === 'stripe')) return (
     <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
       <style>{globalStyles}</style>
-      <div style={{padding:'36px 20px 0',textAlign:'center'}}>
-        <div style={{fontSize:27,fontWeight:900,color:'#f5f0e8',textTransform:'uppercase',letterSpacing:5.5,lineHeight:1.1,marginBottom:0,whiteSpace:'nowrap',fontFamily:'Verdana,sans-serif'}}>Down The Middle</div>
-        <div style={{fontSize:15,fontWeight:700,letterSpacing:3.75,textTransform:'uppercase',color:'#e02247',marginTop:5.5,marginLeft:-6.5,fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
-        <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'28px 0 0'}} />
-      </div>
-      <div style={{padding:'28px 24px',flex:1,display:'flex',flexDirection:'column',gap:28}}>
-        <div style={{display:'flex',justifyContent:'center'}}>
-          <div style={{display:'flex',flexDirection:'column',gap:18}}>
-            {['Handicap tracking','Unlimited rounds','Scoring analytics','Social','$49.99/year'].map(f => (
-              <div key={f} style={{display:'flex',alignItems:'center',gap:14,fontSize:16,color:'#f5f0e8'}}>
-                <span style={{color:'#e8b84b',fontSize:16,fontWeight:700,flexShrink:0,lineHeight:1}}>✓</span>
-                {f}
-              </div>
-            ))}
-          </div>
+      <AppHeader />
+      <div style={{padding:'4px 24px',flex:1,display:'flex',flexDirection:'column',gap:20}}>
+        {isLapsed && <div style={{fontSize:14,color:'#e8b84b',letterSpacing:0.3,textAlign:'center',marginBottom:8,whiteSpace:'nowrap'}}>Your membership has lapsed and is currently inactive!</div>}
+        <div style={{display:'flex',flexDirection:'column',gap:18,paddingLeft:40}}>
+          {['Annual Membership','Handicap tracking','Unlimited rounds','Scoring analytics','Social','$49.99/year · Auto-renewing'].map(f => (
+            <div key={f} style={{display:'flex',alignItems:'center',gap:14,fontSize:16,color:'#f5f0e8'}}>
+              <span style={{color:'#e8b84b',fontSize:16,fontWeight:700,flexShrink:0,lineHeight:1}}>✓</span>
+              {f}
+            </div>
+          ))}
         </div>
         {iapError ? <div style={{fontSize:11,color:'#e02247',letterSpacing:0.5,textAlign:'center'}}>{iapError}</div> : null}
-        <button onClick={handleIAPPurchase} disabled={reactivating} style={{width:'100%',padding:'15px 0',background:reactivating?'rgba(201,168,76,0.4)':'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:4,color:'#0d1b2e',fontSize:13,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:reactivating?'default':'pointer',marginTop:16}}>
-          {reactivating ? 'Processing...' : (isLapsed ? 'Reactivate Membership' : 'Start Membership')}
-        </button>
-        <div style={{fontSize:10,color:'rgba(245,240,232,0.3)',textAlign:'center',lineHeight:1.7}}>
-          Payment charged to your Apple ID. Renews automatically<br/>unless cancelled at least 24 hours before the end of the period.
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          <button onClick={handleIAPPurchase} disabled={reactivating} style={{width:'100%',padding:'15px 0',background:reactivating?'rgba(201,168,76,0.4)':'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:4,color:'#0d1b2e',fontSize:13,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:reactivating?'default':'pointer'}}>
+            {reactivating ? 'Processing...' : (isLapsed ? 'Reactivate Membership' : 'Start Membership')}
+          </button>
+          <div style={{fontSize:10,color:'rgba(245,240,232,0.3)',textAlign:'center',lineHeight:1.7,width:'100%'}}>
+            Payment will be charged to your Apple ID. Your membership will renew automatically unless cancelled at least 24 hours before the end of the period.
+            <div style={{marginTop:10,display:'flex',justifyContent:'center',gap:20}}>
+              <span onClick={()=>Browser.open({url:'https://dtmhandicap.com/privacy'})} style={{textDecoration:'underline',cursor:'pointer'}}>Privacy Policy</span>
+              <span onClick={()=>Browser.open({url:'https://dtmhandicap.com/terms'})} style={{textDecoration:'underline',cursor:'pointer'}}>Terms of Use</span>
+            </div>
+          </div>
         </div>
       </div>
-      <div style={{padding:'24px 28px 44px',textAlign:'center'}}>
-        <button onClick={handleSignOut} style={{background:'none',border:'none',color:'rgba(201,168,76,0.45)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Exit</button>
+      <div style={{padding:'24px 20px 44px',textAlign:'center'}}>
+        <div onClick={handleSignOut} role="button" style={{display:'inline-block',color:'rgba(201,168,76,0.45)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>{isLapsed ? 'Log Out' : 'Exit'}</div>
       </div>
     </div>
   );
@@ -292,11 +310,7 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
   if (isLapsed) return (
     <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
       <style>{globalStyles}</style>
-      <div style={{background:'linear-gradient(180deg,#0d1b2e 0%,#0d1b2e 100%)',padding:'36px 20px 20px',textAlign:'center'}}>
-        <div style={{fontSize:27,fontWeight:900,color:'#f5f0e8',textTransform:'uppercase',letterSpacing:5.5,lineHeight:1.1,marginBottom:0,whiteSpace:'nowrap',fontFamily:'Verdana,sans-serif'}}>Down The Middle</div>
-        <div style={{fontSize:15,fontWeight:700,letterSpacing:3.75,textTransform:'uppercase',color:'#e02247',marginTop:5.5,marginLeft:-6.5,fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
-        <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'28px 0 0'}} />
-      </div>
+      <AppHeader />
       <div style={{padding:'28px 24px',flex:1,display:'flex',flexDirection:'column'}}>
         <div style={{textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:12}}>
           <div style={{fontSize:13,fontWeight:700,letterSpacing:2,textTransform:'uppercase',color:'#e8b84b'}}>Welcome Back, {user.name}</div>
@@ -310,19 +324,77 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
                 body: JSON.stringify({ email: user.email, userId: user.id, reactivation: true }),
               });
               const data = await res.json();
-              if (data.url) window.location.href = data.url;
-              else setReactivating(false);
-            } catch { setReactivating(false); }
-          }} disabled={reactivating} className="auth-btn-primary" style={{marginTop:16,width:'100%',padding:'13px 0',background:'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:3,color:'#0d1b2e',fontSize:11,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',opacity:reactivating?0.6:1}}>
+              if (data.url) {
+                if (isNative) {
+                  await Browser.open({ url: data.url });
+                } else {
+                  window.location.href = data.url;
+                }
+              }
+            } catch {}
+            setReactivating(false);
+          }} disabled={reactivating} className="auth-btn-primary" style={{marginTop:4,width:'100%',padding:'13px 0',background:'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:3,color:'#0d1b2e',fontSize:11,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',opacity:reactivating?0.6:1}}>
             {reactivating ? 'Redirecting...' : 'Reactivate Membership'}
           </button>
-          <button onClick={handleSignOut} style={{background:'none',border:'none',color:'rgba(201,168,76,0.6)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer',marginTop:12}}>Log Out</button>
         </div>
+      </div>
+      <div style={{padding:'24px 20px 44px',textAlign:'center'}}>
+        <div onClick={handleSignOut} role="button" style={{display:'inline-block',color:'rgba(201,168,76,0.45)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Log Out</div>
       </div>
     </div>
   );
 
-  return <div style={{fontSize:10,color:'#e8b84b',letterSpacing:3,textTransform:'uppercase',fontWeight:700}}>Redirecting to checkout...</div>;
+  return (
+    <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
+      <style>{globalStyles}</style>
+      <AppHeader />
+      <div style={{padding:'28px 24px',flex:1,display:'flex',flexDirection:'column'}}>
+        <div style={{textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:12}}>
+          <div style={{fontSize:13,fontWeight:700,letterSpacing:2,textTransform:'uppercase',color:'#e8b84b'}}>How Would You Like to Subscribe?</div>
+          <div style={{fontSize:13,color:'#f5f0e8',lineHeight:1.7}}>Continue via the web, or subscribe on an Apple device<br />using In-App Purchase through the App Store.</div>
+          <button
+            onClick={async () => {
+              setRedirecting(true);
+              try {
+                const res = await fetch(`${API_BASE}/api/create-checkout-session`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ email: session?.user?.email, userId: session?.user?.id }),
+                });
+                const data = await res.json();
+                if (data.url) window.location.href = data.url;
+              } catch {}
+              setRedirecting(false);
+            }}
+            disabled={redirecting}
+            onMouseEnter={e=>e.currentTarget.style.boxShadow='0 0 20px rgba(232,184,75,0.5)'}
+            onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}
+            style={{width:'100%',padding:'13px 0',background:'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:3,color:'#0d1b2e',fontSize:11,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',opacity:redirecting?0.6:1,marginTop:4,transition:'box-shadow 0.2s ease'}}
+          >
+            {redirecting ? 'Redirecting...' : 'Subscribe via Web'}
+          </button>
+          <div style={{display:'flex',alignItems:'center',gap:12,width:'100%'}}>
+            <div style={{flex:1,height:1,background:'rgba(245,240,232,0.1)'}} />
+            <span style={{fontSize:11,color:'rgba(245,240,232,0.3)',letterSpacing:1}}>or</span>
+            <div style={{flex:1,height:1,background:'rgba(245,240,232,0.1)'}} />
+          </div>
+          <a
+            href="https://apps.apple.com/app/id6783389659"
+            target="_blank"
+            rel="noreferrer"
+            onMouseEnter={e=>e.currentTarget.style.background='rgba(30,30,30,1)'}
+            onMouseLeave={e=>e.currentTarget.style.background='#000'}
+            style={{display:'flex',alignItems:'center',justifyContent:'center',width:'100%',padding:'5px 0',background:'#000',borderRadius:3,cursor:'pointer',textDecoration:'none',boxSizing:'border-box'}}
+          >
+            <img src="/app-store-badge.svg" alt="Download on the App Store" style={{height:30,width:'auto'}} />
+          </a>
+        </div>
+      </div>
+      <div style={{padding:'24px 20px 44px',textAlign:'center'}}>
+        <div onClick={handleSignOut} role="button" style={{display:'inline-block',color:'rgba(201,168,76,0.45)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Log Out</div>
+      </div>
+    </div>
+  );
 }
 
 
@@ -349,11 +421,13 @@ const globalStyles = `
   input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus { -webkit-box-shadow: 0 0 0px 1000px rgba(8,18,36,1) inset !important; -webkit-text-fill-color: #f5f0e8 !important; background-color: rgba(8,18,36,1) !important; }
   html, body { background: #0d1b2e; margin: 0; padding: 0; }
   .dtm-app-frame { padding-top: env(safe-area-inset-top); }
+  @keyframes dtm-spin { to { transform: rotate(360deg); } }
+  .dtm-row-btn:hover { background: rgba(232,184,75,0.06) !important; }
   .font-verdana { font-family: Verdana, Geneva, sans-serif !important; }
   input::placeholder { color: rgba(245,240,232,0.2); }
   input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
   .auth-btn-primary:hover { filter: brightness(1.1); }
-  .auth-btn-ghost:hover { border-color: rgba(201,168,76,0.6) !important; color: rgba(201,168,76,0.9) !important; }
+  .auth-btn-ghost:hover { border-color: rgba(201,168,76,0.8) !important; color: rgba(201,168,76,1) !important; box-shadow: 0 0 18px rgba(232,184,75,0.35) !important; }
   .auth-link:hover { color: #f5c842; }
   .confirm-post-btn:hover{filter:brightness(1.15);transform:scale(1.02);transition:all 0.15s ease;}
   .tab-btn:hover{color:rgba(245,240,232,0.75)!important;transition:all 0.15s ease;}
@@ -397,7 +471,7 @@ function MemberNumberInput({ value, onChange, inputStyle }) {
 }
 
 // ─── Auth Screen ───────────────────────────────────────────────────────────────
-function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogin, onForceLoginClear, onResetComplete, fromEmailLink, onEmailLinkClear, onShowAppBanner, reactivationReturn, onReactivationDismiss, preFillMemberNumber }) {
+function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogin, onForceLoginClear, onResetComplete, fromEmailLink, onEmailLinkClear, onShowAppBanner, reactivationReturn, onReactivationDismiss, preFillMemberNumber, preFillNonce }) {
   const [mode, setMode] = useState(() => {
     if (resetToken) return 'resetPassword';
     if (forceLogin) return 'login';
@@ -407,6 +481,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
     return verifiedEmail ? 'login' : 'landing';
   });
   useEffect(() => { if (forceLogin) { setMode('login'); onForceLoginClear && onForceLoginClear(); } }, [forceLogin]);
+  useEffect(() => { if (resetToken) setMode('resetPassword'); }, [resetToken]);
   const showOpenInApp = fromEmailLink && /iPhone|iPad|iPod/.test(navigator.userAgent);
   const [verifySuccess] = useState(!!verifiedEmail);
   useEffect(() => { if (verifiedUser) { setPendingUser(verifiedUser); setMode('onboarding'); } }, [verifiedUser]);
@@ -414,7 +489,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [memberNumber, setMemberNumber] = useState(preFillMemberNumber || '');
-  useEffect(() => { if (preFillMemberNumber) { setMemberNumber(preFillMemberNumber); setMode('login'); } }, [preFillMemberNumber]);
+  useEffect(() => { if (preFillMemberNumber) { setMemberNumber(preFillMemberNumber); setMode('login'); } }, [preFillNonce]);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [pendingUser, setPendingUser] = useState(null);
@@ -431,7 +506,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
     wrap: { maxWidth:430, margin:'0 auto', minHeight:'100dvh', background:'#0d1b2e', color:'#f5f0e8', display:'flex', flexDirection:'column' },
     top: { background:'linear-gradient(180deg,#0d1b2e 0%,#0d1b2e 100%)', padding:'36px 20px 20px', textAlign:'center' },
     title: { fontSize:27, fontWeight:900, color:'#f5f0e8', textTransform:'uppercase', letterSpacing:5.5, lineHeight:1.1, marginBottom:0, whiteSpace:'nowrap', fontFamily:'Verdana,sans-serif' },
-    sub: { fontSize:15, fontWeight:700, letterSpacing:3.75, textTransform:'uppercase', color:'#e02247', marginTop:5.5, marginLeft:-6.5, fontFamily:'Verdana,sans-serif' },
+    sub: { fontSize:15, fontWeight:700, letterSpacing:3.75, textTransform:'uppercase', color:'#e02247', marginTop:5.5, marginLeft:-5, fontFamily:'Verdana,sans-serif' },
     divider: { height:2, background:'rgba(201,168,76,0.45)', margin:'28px 0 0' },
     body: { padding:'28px 24px', flex:1 },
     label: { fontSize:9, fontWeight:700, letterSpacing:3, textTransform:'uppercase', color:'rgba(201,168,76,0.75)', marginBottom:6, display:'block', paddingLeft:2 },
@@ -447,13 +522,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
 
   const anonHeaders = { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY };
 
-  const Header = () => (
-    <div style={S.top}>
-      <div style={S.title}>Down The Middle</div>
-      <div style={S.sub}>A Truer Golf Handicap</div>
-      <div style={S.divider} />
-    </div>
-  );
+  const Header = () => <AppHeader />;
 
   const handleSignUp = async () => {
     setError(''); setMessage('');
@@ -531,7 +600,14 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
       if (!res.ok || !data.access_token) { setLoading(false); return setError('Incorrect password'); }
       const session = { access_token: data.access_token, refresh_token: data.refresh_token, expires_at: data.expires_at, user: data.user };
       localStorage.setItem("sb-session", JSON.stringify(session));
-      onAuth({ id: data.user.id, name: fullProfile.name, lastName: fullProfile.last_name || '', email: fullProfile.email, memberNumber: fullProfile.member_number, createdAt: fullProfile.created_at, subscribed: fullProfile.subscribed || false, subscriptionRenewsAt: fullProfile.subscription_renews_at || null, stripeCustomerId: fullProfile.stripe_customer_id || null, paymentProvider: fullProfile.payment_provider || null });
+      let authProfile = fullProfile;
+      try {
+        const authProfRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${data.user.id}&select=*`, {
+          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${data.access_token}`, 'Accept': 'application/vnd.pgrst.object+json' }
+        });
+        if (authProfRes.ok) authProfile = await authProfRes.json();
+      } catch {}
+      onAuth({ id: data.user.id, name: authProfile.name, lastName: authProfile.last_name || '', email: authProfile.email, memberNumber: authProfile.member_number, createdAt: authProfile.created_at, subscribed: authProfile.subscribed || false, subscriptionRenewsAt: authProfile.subscription_renews_at || null, stripeCustomerId: authProfile.stripe_customer_id || null, paymentProvider: authProfile.payment_provider || null });
     } catch (e) { setError("Network error — please try again"); }
     setLoading(false);
   };
@@ -756,7 +832,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
       <style>{globalStyles}</style>
       <Header/>
       <div style={S.body}>
-        <div style={{textAlign:'center',padding:'20px 0 28px'}}>
+        <div style={{textAlign:'center',padding:'7px 0 28px'}}>
           <div style={{fontSize:14,fontWeight:700,color:'#e8b84b',letterSpacing:3,textTransform:'uppercase',marginBottom:20}}>Check Your Email</div>
           <div style={{fontSize:14,color:'rgba(245,240,232,0.55)',lineHeight:1.9,marginBottom:24}}>
             A verification link was sent to:<br/>
@@ -772,12 +848,8 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
   if (mode === 'onboarding') return (
     <div className="dtm-app-frame" style={S.wrap}>
       <style>{globalStyles}</style>
-      <div style={{flex:1, display:'flex', flexDirection:'column', justifyContent:'flex-start', padding:'32px 28px 40px'}}>
-        <div style={{marginBottom:0, textAlign:'center'}}>
-          <div style={{fontSize:27, fontWeight:900, color:'#f5f0e8', letterSpacing:5.5, textTransform:'uppercase', lineHeight:1.1, marginBottom:0, whiteSpace:'nowrap', fontFamily:'Verdana,sans-serif'}}>Down The Middle</div>
-          <div style={{fontSize:15, fontWeight:700, letterSpacing:3.75, textTransform:'uppercase', color:'#e02247', marginTop:5.5, marginLeft:-6.5, fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
-        </div>
-        <div style={{height:2, background:'rgba(201,168,76,0.45)', margin:'24px 0 20px'}}/>
+      <AppHeader />
+      <div style={{flex:1, display:'flex', flexDirection:'column', justifyContent:'flex-start', padding:'20px 28px 40px'}}>
         <div style={{display:'flex', flexDirection:'column', gap:22}}>
           <p style={{margin:0, fontSize:18, color:'#e8b84b', lineHeight:1.75, fontWeight:700, textAlign:'center', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>Welcome, {pendingUser?.name}!</p>
           <p style={{margin:0, fontSize:14.5, color:'rgba(245,240,232,0.9)', lineHeight:1.75, fontWeight:400}}>
@@ -802,7 +874,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
       <style>{globalStyles}</style>
       <Header />
       <div style={{...S.body, paddingTop:8}}>
-        <button style={S.back} onClick={()=>{clearFields();setMode('login');}}>← Back</button>
+        <button style={{...S.back, marginBottom:20}} onClick={()=>{clearFields();setMode('login');}}>← Back</button>
         <div style={{fontSize:14,color:'rgba(245,240,232,0.5)',marginBottom:20,lineHeight:1.6}}>An email with a link to reset your password will be sent to the address below:</div>
         <div style={S.field}><label style={S.label}>Email</label><input style={{...S.input,colorScheme:'dark'}} placeholder="" type="email" value={resetEmail} onChange={e=>setResetEmail(e.target.value)} /></div>
         {error && <div style={S.error}>{error}</div>}
@@ -817,7 +889,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
       <style>{globalStyles}</style>
       <Header />
       <div style={{...S.body, paddingTop:8}}>
-        <button style={S.back} onClick={()=>{clearFields();setMode('login');}}>← Back</button>
+        <button style={{...S.back, marginBottom:20}} onClick={()=>{clearFields();setMode('login');}}>← Back</button>
         <div style={{fontSize:14,color:'rgba(245,240,232,0.5)',marginBottom:20,lineHeight:1.6}}>An email with your Member # will be sent to the<br/>address below:</div>
         <div style={S.field}><label style={S.label}>Email</label><input style={{...S.input,colorScheme:'dark'}} placeholder="" type="email" value={email} onChange={e=>setEmail(e.target.value)} /></div>
         {error && <div style={S.error}>{error}</div>}
@@ -855,7 +927,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
         onResetComplete();
         clearFields();
         setMode('login');
-        if (/iPhone|iPad|iPod/.test(navigator.userAgent)) onShowAppBanner?.();
+        if (/iPhone|iPad|iPod/.test(navigator.userAgent) && !window.Capacitor?.isNativePlatform?.()) onShowAppBanner?.();
       } catch { setError('Something went wrong'); }
       setLoading(false);
     };
@@ -864,7 +936,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
         <style>{globalStyles}</style>
         <Header />
         <div style={{...S.body, paddingTop:8}}>
-          <div style={{fontSize:14,color:'rgba(245,240,232,0.5)',marginBottom:24,lineHeight:1.6}}>Create your new password:</div>
+          <div style={{fontSize:14,color:'rgba(245,240,232,0.5)',marginBottom:20,lineHeight:1.6}}>Create your new password:</div>
           <div style={S.field}><label style={S.label}>New Password</label><input style={{...S.input,colorScheme:'dark'}} placeholder="" type="password" value={password} onChange={e=>{setPassword(e.target.value);setError('');}} />{password.length > 0 && password.length < 8 && <div style={{fontSize:11,color:'#e02247',marginTop:5,letterSpacing:0.5}}>Minimum 8 characters required</div>}</div>
           <div style={S.field}><label style={S.label}>Confirm Password</label><input style={{...S.input,colorScheme:'dark'}} placeholder="" type="password" value={confirmPassword} onChange={e=>{setConfirmPassword(e.target.value);setError('');}} /></div>
           {error && <div style={S.error}>{error}</div>}
@@ -984,6 +1056,10 @@ function HotNotSection({ user, partners, profiles, trends, handicaps, userRounds
     </span>
   );
 
+  const hasPartners = partners.length > 0;
+  const hasPersonalStreak = userResult.trend === 'hot' || userResult.trend === 'not';
+  if (!hasPartners && !hasPersonalStreak) return null;
+
   return (
     <div style={{marginTop:20}}>
       <div style={{height:1,background:'rgba(201,168,76,0.2)',marginBottom:16}}/>
@@ -994,7 +1070,7 @@ function HotNotSection({ user, partners, profiles, trends, handicaps, userRounds
           <InfoIcon text={<>Consecutive rounds handicap<br/>has decreased (min. 3)</>} />
         </div>
         {hot.length === 0
-          ? <div style={{fontSize:11,color:'rgba(245,240,232,0.2)',fontStyle:'italic',paddingLeft:4}}>Somebody needs to get it going!</div>
+          ? hasPartners && <div style={{fontSize:11,color:'rgba(245,240,232,0.2)',fontStyle:'italic',paddingLeft:4}}>Somebody needs to get it going!</div>
           : hot.map(e => <EntryRow key={e.id} entry={e} />)
         }
       </div>
@@ -1005,7 +1081,7 @@ function HotNotSection({ user, partners, profiles, trends, handicaps, userRounds
           <InfoIcon text={<>Consecutive rounds handicap<br/>has increased (min. 3)</>} />
         </div>
         {not.length === 0
-          ? <div style={{fontSize:11,color:'rgba(245,240,232,0.2)',fontStyle:'italic',paddingLeft:4}}>Keep up the low scoring!</div>
+          ? hasPartners && <div style={{fontSize:11,color:'rgba(245,240,232,0.2)',fontStyle:'italic',paddingLeft:4}}>Keep up the low scoring!</div>
           : not.map(e => <EntryRow key={e.id} entry={e} />)
         }
       </div>
@@ -1114,7 +1190,7 @@ function PartnersPanel({ user, partners, partnerRequests, sentRequests, trends, 
                       </div>
                       {isPartner
                         ? <span style={{fontSize:9,color:'rgba(245,240,232,0.3)',letterSpacing:1,textTransform:'uppercase'}}>Already Added</span>
-                        : <span style={{fontSize:9,color:'#84e040',letterSpacing:1,textTransform:'uppercase',fontWeight:700}}>{partnerLoading?'Sending...':'+ Send Request'}</span>
+                        : <span style={{fontSize:9,color:'#84e040',letterSpacing:1,textTransform:'uppercase',fontWeight:700}}>{partnerLoading===r.id?'Sending...':'+ Send Request'}</span>
                       }
                     </div>
                   );
@@ -1180,7 +1256,7 @@ function PartnersPanel({ user, partners, partnerRequests, sentRequests, trends, 
             </div>
             {(partners.length<4||!partnersCollapsed)&&(
               partners.length===0
-                ? <div style={{fontSize:12,color:'rgba(245,240,232,0.3)',fontStyle:'italic',textAlign:'left',padding:'8px 0',paddingLeft:4}}>No partners yet</div>
+                ? null
                 : (sortedPartners.length > 0 ? sortedPartners : partners).map(p=>{
                     const otherId=p.requester_id===user.id?p.recipient_id:p.requester_id;
                     const prof=profiles[otherId];
@@ -1223,8 +1299,7 @@ function PartnersPanel({ user, partners, partnerRequests, sentRequests, trends, 
 
 // ─── Support Panel ─────────────────────────────────────────────────────────────
 function SupportPanel({ user, onBack, onHome }) {
-  const [form, setForm] = useState({ name: user.name + (user.lastName ? ' ' + user.lastName : ''), email: user.email, message: '' });
-  const [editEmail, setEditEmail] = useState(false);
+  const [form, setForm] = useState({ name: user.name + (user.lastName ? ' ' + user.lastName : ''), message: '' });
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
@@ -1237,7 +1312,7 @@ function SupportPanel({ user, onBack, onHome }) {
       const res = await fetch(`${API_BASE}/api/send-support-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name, email: form.email, memberNumber: user.memberNumber, message: form.message }),
+        body: JSON.stringify({ name: form.name, email: user.email, memberNumber: user.memberNumber, message: form.message }),
       });
       if (res.ok) {
         setSent(true);
@@ -1277,10 +1352,9 @@ function SupportPanel({ user, onBack, onHome }) {
             </div>
           ) : (
             <>
-              <div style={{fontSize:12,color:'#f5f0e8',fontWeight:400,lineHeight:1.7,marginBottom:20}}>
+              <div style={{fontSize:13,color:'#f5f0e8',fontWeight:400,lineHeight:1.7,marginBottom:20}}>
                 <div>Have an issue or a question?</div>
-                <div>Send us a message in the form provided below</div>
-                <div>and we will email you a reply as soon as possible.</div>
+                <div>Send us a message in the form provided below:</div>
               </div>
               <div style={{marginBottom:12}}>
                 <label style={labelStyle}>Name</label>
@@ -1292,12 +1366,7 @@ function SupportPanel({ user, onBack, onHome }) {
               </div>
               <div style={{marginBottom:12}}>
                 <label style={{...labelStyle,marginBottom:6,display:'block'}}>Email</label>
-                <div style={{position:'relative'}}>
-                  <input style={{...inputStyle,opacity:editEmail?1:0.6,paddingRight:36}} value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} type="email" readOnly={!editEmail} />
-                  <button onClick={()=>setEditEmail(p=>!p)} style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',padding:0,lineHeight:1,fontSize:16,color:'#e8b84b'}}>
-                    {editEmail ? '✓' : <span style={{fontSize:9,fontWeight:700,letterSpacing:1,textTransform:'uppercase',color:'rgba(201,168,76,0.6)'}}>Edit</span>}
-                  </button>
-                </div>
+                <input style={{...inputStyle,opacity:0.6}} value={user.email} readOnly />
               </div>
               <div style={{marginBottom:15}}>
                 <label style={labelStyle}>Message</label>
@@ -1316,19 +1385,58 @@ function SupportPanel({ user, onBack, onHome }) {
 }
 
 // ─── Profile Drawer ────────────────────────────────────────────────────────────
-function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsync, onClose, onSignOut, onAccountDeleted, onPartnerUpdate, onHome }) {
+function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsync, onClose, onSignOut, onAccountDeleted, onPartnerUpdate, onHome, onUserUpdate }) {
   const [subPanel, setSubPanel] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [portalLoading, setPortalLoading] = useState(false);
+
+  const [emailForm, setEmailForm] = useState({ next:'', confirm:'' });
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [emailSuccess, setEmailSuccess] = useState('');
+  const [emailLoading, setEmailLoading] = useState(false);
 
   const [pwForm, setPwForm] = useState({ current:'', next:'', confirm:'' });
   const [showPwForm, setShowPwForm] = useState(false);
   const [pwError, setPwError] = useState('');
   const [pwSuccess, setPwSuccess] = useState('');
   const [pwLoading, setPwLoading] = useState(false);
+  const scrollContainerRef = useRef(null);
+  const scrollInputIntoView = (e) => {
+    const input = e.target;
+    const attempt = () => {
+      const container = scrollContainerRef.current;
+      if (!container || !input) return;
+      const inputRect = input.getBoundingClientRect();
+      const visibleHeight = window.visualViewport?.height || (window.innerHeight - 300);
+      const visibleBottom = visibleHeight - 24;
+      if (inputRect.bottom > visibleBottom) {
+        container.scrollTop += (inputRect.bottom - visibleBottom + 24);
+      }
+    };
+    setTimeout(attempt, 350);
+    setTimeout(attempt, 650);
+  };
 
-  const [showDeleteForm, setShowDeleteForm] = useState(false);
+  useEffect(() => {
+    if (!showPwForm) return;
+    const attempt = () => {
+      const container = scrollContainerRef.current;
+      const el = pwFormRef.current;
+      if (!container || !el) return;
+      const cTop = container.getBoundingClientRect().top;
+      const eTop = el.getBoundingClientRect().top;
+      const delta = (eTop - cTop) - 8;
+      if (delta > 0) container.scrollTop += delta;
+    };
+    const t1 = setTimeout(attempt, 150);
+    const t2 = setTimeout(attempt, 450);
+    const t3 = setTimeout(attempt, 800);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [showPwForm]);
+
+const [showDeleteForm, setShowDeleteForm] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -1368,10 +1476,46 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
       const existing = JSON.parse(localStorage.getItem('sb-session') || '{}');
       localStorage.setItem('sb-session', JSON.stringify({ ...existing, access_token, refresh_token, expires_at, user: verifyUser || existing.user }));
     } catch {}
-    setPwSuccess('Password changed successfully');
+    setPwSuccess('Password changed');
     setPwForm({ current:'', next:'', confirm:'' });
     setPwLoading(false);
     setTimeout(() => { setPwSuccess(''); setShowPwForm(false); }, 1500);
+    try {
+      await fetch(`${API_BASE}/api/send-auth-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'password_changed', email: user.email }),
+      });
+    } catch {}
+  };
+
+  const handleEmailChange = async () => {
+    setEmailError(''); setEmailSuccess('');
+    if (!emailForm.next.trim()) return setEmailError('Please enter a new email address');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailForm.next.trim())) return setEmailError('Please enter a valid email address');
+    if (emailForm.next.trim().toLowerCase() === user.email.toLowerCase()) return setEmailError('New email must be different from your current email');
+    if (emailForm.next.trim() !== emailForm.confirm.trim()) return setEmailError('Email addresses do not match');
+    setEmailLoading(true);
+    try {
+      const s = JSON.parse(localStorage.getItem('sb-session') || 'null');
+      if (!s?.access_token) { setEmailError('Session expired — please log in again.'); setEmailLoading(false); return; }
+      const res = await fetch(`${API_BASE}/api/change-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${s.access_token}` },
+        body: JSON.stringify({ userId: user.id, newEmail: emailForm.next.trim().toLowerCase() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setEmailError(data.error || 'Failed to update email. Please try again.'); setEmailLoading(false); return; }
+      const newEmail = emailForm.next.trim().toLowerCase();
+      setEmailSuccess('Email updated');
+      setEmailForm({ next:'', confirm:'' });
+      setEmailLoading(false);
+      onUserUpdate?.({ ...user, email: newEmail });
+      setTimeout(() => { setEmailSuccess(''); setShowEmailForm(false); }, 1500);
+    } catch {
+      setEmailError('Something went wrong — please try again.');
+      setEmailLoading(false);
+    }
   };
 
   const handleDeleteAccount = async () => {
@@ -1419,7 +1563,7 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
       <div onClick={()=>{setSubPanel(null);setShowPwForm(false);setPwForm({current:'',next:'',confirm:''});setPwError('');setPwSuccess('');}} style={{position:'fixed',inset:0,background:'#0d1b2e',zIndex:200}} />
       <div className="dtm-app-frame" style={{position:'fixed',top:0,bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:430,background:'#0d1b2e',zIndex:201,display:'flex',flexDirection:'column',overflowY:'auto'}}>
         <div style={{background:'linear-gradient(180deg,#0d1b2e 0%,#0d1b2e 100%)',padding:'16px 20px 14px'}}>
-          <button onClick={()=>setSubPanel(null)} style={{background:'none',border:'none',color:'rgba(201,168,76,0.5)',fontSize:11,letterSpacing:2,textTransform:'uppercase',cursor:'pointer',padding:0,marginBottom:4}}>← Back</button>
+          <button onClick={()=>{setSubPanel(null);}} style={{background:'none',border:'none',color:'rgba(201,168,76,0.5)',fontSize:11,letterSpacing:2,textTransform:'uppercase',cursor:'pointer',padding:0,marginBottom:4}}>← Back</button>
           <div style={{fontSize:11,fontWeight:700,letterSpacing:4,textTransform:'uppercase',color:'#e8b84b',marginTop:18}}>Membership & Payment</div>
         </div>
         <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'0 20px'}} />
@@ -1439,7 +1583,7 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
             </div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <div style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(201,168,76,0.6)'}}>Payment Method</div>
-              <div style={{fontSize:12,fontWeight:600,color:'#f5f0e8'}}>On file</div>
+              <div style={{fontSize:12,fontWeight:600,color:'#f5f0e8'}}>{user.paymentProvider === 'apple' ? 'Apple In-App Purchase' : 'Stripe'}</div>
             </div>
           </div>
           <div style={{height:1,background:'rgba(201,168,76,0.08)',marginBottom:16}}/>
@@ -1453,56 +1597,36 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
               >
                 Manage Membership & Payment
               </button>
+            </>
+          ) : (
+            <>
               <button
                 onClick={async () => {
+                  if (portalLoading) return;
+                  if (!user.stripeCustomerId) return;
                   setPortalLoading(true);
                   try {
-                    const { customerInfo } = await Purchases.restorePurchases();
-                    const isActive = customerInfo?.activeSubscriptions?.length > 0;
-                    if (isActive) {
-                      const renewsAt = customerInfo.latestExpirationDate || null;
-                      const savedSession = JSON.parse(localStorage.getItem('sb-session') || 'null');
-                      if (savedSession?.access_token) {
-                        await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${savedSession.access_token}` },
-                          body: JSON.stringify({ subscribed: true, payment_provider: 'apple', subscription_renews_at: renewsAt }),
-                        });
+                    const res = await fetch(`${API_BASE}/api/create-portal-session`, {
+                      method: 'POST',
+                      headers: { ...(await authHeadersAsync()), 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ customerId: user.stripeCustomerId }),
+                    });
+                    const data = await res.json();
+                    if (data.url) {
+                      if (window.Capacitor?.isNativePlatform?.()) {
+                        await Browser.open({ url: data.url });
+                      } else {
+                        window.location.href = data.url;
                       }
                     }
                   } catch {}
                   setPortalLoading(false);
                 }}
-                style={{width:'100%',padding:11,background:'transparent',border:'1px solid rgba(201,168,76,0.3)',borderRadius:3,color:'#e8b84b',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',marginBottom:12,opacity:portalLoading?0.5:1}}
+                className="signout-btn" style={{width:'100%',padding:11,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',marginBottom:12}}
               >
-                {portalLoading ? 'Restoring...' : 'Restore Purchases'}
+                {portalLoading ? 'Loading...' : 'Manage Membership & Payment'}
               </button>
             </>
-          ) : (
-            <button
-              onClick={async () => {
-                if (!user.stripeCustomerId || portalLoading) return;
-                setPortalLoading(true);
-                try {
-                  const res = await fetch(`${API_BASE}/api/create-portal-session`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ customerId: user.stripeCustomerId }),
-                  });
-                  const data = await res.json();
-                  if (data.url) {
-                    if (window.Capacitor?.isNativePlatform?.()) await Browser.open({ url: data.url });
-                    else window.location.href = data.url;
-                  }
-                } catch (err) {
-                  console.error('Portal error:', err);
-                }
-                setPortalLoading(false);
-              }}
-              className="signout-btn" style={{width:'100%',padding:11,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',marginBottom:12}}
-            >
-              {portalLoading ? 'Loading...' : 'Manage Membership & Payment'}
-            </button>
           )}
         </div>
       </div>
@@ -1511,6 +1635,103 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
 
   if (subPanel === 'support') return (
     <SupportPanel user={user} onBack={()=>setSubPanel(null)} onHome={()=>{setSubPanel(null);onClose();onHome();}} />
+  );
+
+  if (subPanel === 'account' && showEmailForm) return (
+    <>
+      <div onClick={()=>{setShowEmailForm(false);setEmailError('');setEmailSuccess('');setEmailForm({next:'',confirm:''});}} style={{position:'fixed',inset:0,background:'#0d1b2e',zIndex:200}} />
+      <div className="dtm-app-frame" style={{position:'fixed',top:0,bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:430,background:'#0d1b2e',zIndex:201,display:'flex',flexDirection:'column'}}>
+        <div style={{background:'linear-gradient(180deg,#0d1b2e 0%,#0d1b2e 100%)',padding:'16px 20px 14px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+            <button onClick={()=>{setShowEmailForm(false);setEmailError('');setEmailSuccess('');setEmailForm({next:'',confirm:''});}} style={{background:'none',border:'none',color:'rgba(201,168,76,0.5)',fontSize:11,letterSpacing:2,textTransform:'uppercase',cursor:'pointer',padding:0}}>← Back</button>
+          </div>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:4,textTransform:'uppercase',color:'#e8b84b',marginTop:18}}>Edit Account Information</div>
+        </div>
+        <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'0 20px'}} />
+        <div style={{padding:'28px 20px',flex:1,overflowY:'auto'}}>
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            <div><label style={labelStyle}>New Email Address</label><input style={inputStyle} type="email" autoCapitalize="off" autoCorrect="off" value={emailForm.next} onChange={e=>{setEmailForm(p=>({...p,next:e.target.value}));setEmailError('');}} /></div>
+            <div><label style={labelStyle}>Confirm New Email Address</label><input style={inputStyle} type="email" autoCapitalize="off" autoCorrect="off" value={emailForm.confirm} onChange={e=>{setEmailForm(p=>({...p,confirm:e.target.value}));setEmailError('');}} /></div>
+            {emailError && <div style={{fontSize:11,color:'#e02247',letterSpacing:0.5}}>{emailError}</div>}
+            {emailSuccess && <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11,letterSpacing:0.5}}><span style={{color:'#84e040'}}>{emailSuccess}</span><span style={{fontSize:16,color:'#84e040',lineHeight:1,position:'relative',top:'-1px'}}>✓</span></div>}
+            <button onClick={handleEmailChange} disabled={emailLoading} className="signout-btn" style={{width:'100%',padding:11,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',opacity:emailLoading?0.5:1,marginTop:10}}>
+              {emailLoading ? 'Updating...' : 'Change Email Address'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+if (subPanel === 'account' && showDeleteForm) return (
+    <>
+      <div onClick={()=>{if(!deleteLoading){setShowDeleteForm(false);setDeleteConfirmText('');setDeleteError('');setShowDeleteModal(false);}}} style={{position:'fixed',inset:0,background:'#0d1b2e',zIndex:200}} />
+      <div className="dtm-app-frame" style={{position:'fixed',top:0,bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:430,background:'#0d1b2e',zIndex:201,display:'flex',flexDirection:'column'}}>
+        <div style={{background:'linear-gradient(180deg,#0d1b2e 0%,#0d1b2e 100%)',padding:'16px 20px 14px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+            <button onClick={()=>{if(!deleteLoading){setShowDeleteForm(false);setDeleteConfirmText('');setDeleteError('');setShowDeleteModal(false);}}} style={{background:'none',border:'none',color:'rgba(201,168,76,0.5)',fontSize:11,letterSpacing:2,textTransform:'uppercase',cursor:'pointer',padding:0}}>← Back</button>
+          </div>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:4,textTransform:'uppercase',color:'#e8b84b',marginTop:18}}>Delete Account</div>
+        </div>
+        <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'0 20px'}} />
+        <div style={{padding:'28px 20px',flex:1,overflowY:'auto'}}>
+          <div style={{display:'flex',flexDirection:'column',gap:16}}>
+            <div style={{fontSize:13,color:'rgba(245,240,232,0.7)',lineHeight:1.8,letterSpacing:0.3}}>
+              {user?.paymentProvider==='apple'?'This action is permanent and cannot be undone. Deleting your account does not automatically cancel your membership, you must do so in the App Store.':<>This action is permanent and cannot be undone.<br/>It will also cancel any active membership that you have.</>}
+            </div>
+            <button onClick={()=>{setShowDeleteModal(true);setDeleteConfirmText('');setDeleteError('');}} className="signout-btn" style={{width:'100%',padding:11,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>
+              Delete Account
+            </button>
+          </div>
+        </div>
+      </div>
+      {showDeleteModal && (
+        <div onClick={()=>{if(!deleteLoading){setShowDeleteModal(false);setDeleteConfirmText('');setDeleteError('');}}} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',display:'flex',alignItems:'flex-start',justifyContent:'center',zIndex:400,padding:'180px 20px 0'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#0d1b2e',border:'1px solid rgba(201,168,76,0.3)',borderRadius:6,padding:'24px 20px',width:'100%',maxWidth:360,display:'flex',flexDirection:'column',gap:14}}>
+            <div style={{fontSize:12,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#e8b84b',textAlign:'center'}}>Delete Account</div>
+            <div style={{height:1,background:'rgba(201,168,76,0.2)'}} />
+            <div>
+              <label style={{fontSize:7,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(201,168,76,0.6)',marginBottom:6,display:'block'}}>Type DELETE to confirm</label>
+              <input style={{...inputStyle,border:'1px solid rgba(201,168,76,0.35)'}} placeholder="" value={deleteConfirmText} onChange={e=>setDeleteConfirmText(e.target.value.toUpperCase())} autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
+            </div>
+            {deleteError && <div style={{fontSize:11,color:'#e02247',letterSpacing:0.5}}>{deleteError}</div>}
+            <button onClick={handleDeleteAccount} disabled={deleteConfirmText!=='DELETE'||deleteLoading} style={{width:'100%',padding:11,background:deleteConfirmText==='DELETE'?'linear-gradient(135deg,#c41e3a,#9e1830)':'rgba(100,20,30,0.4)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:deleteConfirmText==='DELETE'?'pointer':'default',opacity:deleteLoading?0.5:1,transition:'background 0.2s ease'}}>
+              {deleteLoading ? 'Deleting...' : 'Delete Account'}
+            </button>
+            <button onClick={()=>{setShowDeleteModal(false);setDeleteConfirmText('');setDeleteError('');}} disabled={deleteLoading} className="confirm-cancel-btn dtm-label" style={{width:'100%',padding:9,background:'transparent',border:'1px solid rgba(201,168,76,0.3)',borderRadius:3,color:'#e8b84b',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  if (subPanel === 'account' && showPwForm) return (
+    <>
+      <div onClick={()=>{setShowPwForm(false);setPwForm({current:'',next:'',confirm:''});setPwError('');setPwSuccess('');}} style={{position:'fixed',inset:0,background:'#0d1b2e',zIndex:200}} />
+      <div className="dtm-app-frame" style={{position:'fixed',top:0,bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:430,background:'#0d1b2e',zIndex:201,display:'flex',flexDirection:'column'}}>
+        <div style={{background:'linear-gradient(180deg,#0d1b2e 0%,#0d1b2e 100%)',padding:'16px 20px 14px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+            <button onClick={()=>{setShowPwForm(false);setPwForm({current:'',next:'',confirm:''});setPwError('');setPwSuccess('');}} style={{background:'none',border:'none',color:'rgba(201,168,76,0.5)',fontSize:11,letterSpacing:2,textTransform:'uppercase',cursor:'pointer',padding:0}}>← Back</button>
+          </div>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:4,textTransform:'uppercase',color:'#e8b84b',marginTop:18}}>Change Password</div>
+        </div>
+        <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'0 20px'}} />
+        <div ref={scrollContainerRef} style={{padding:'28px 20px',flex:1,overflowY:'auto'}}>
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            <div><label style={labelStyle}>Current Password</label><input style={inputStyle} type="password" placeholder="" value={pwForm.current} onChange={e=>setPwForm(p=>({...p,current:e.target.value}))} onFocus={scrollInputIntoView}/></div>
+            <div><label style={labelStyle}>New Password</label><input style={inputStyle} type="password" placeholder="" value={pwForm.next} onChange={e=>{setPwForm(p=>({...p,next:e.target.value}));setPwError('');}} onFocus={scrollInputIntoView}/>{pwForm.next.length>0&&pwForm.next.length<8&&<div style={{fontSize:11,color:'#e02247',marginTop:5,letterSpacing:0.5}}>Minimum 8 characters required</div>}</div>
+            <div style={{marginTop:10}}><label style={labelStyle}>Confirm New Password</label><input style={inputStyle} type="password" placeholder="" value={pwForm.confirm} onChange={e=>{setPwForm(p=>({...p,confirm:e.target.value}));setPwError('');}} onFocus={scrollInputIntoView}/></div>
+            {pwError && <div style={{fontSize:11,color:'#e02247',letterSpacing:1}}>{pwError}</div>}
+            {pwSuccess && <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11,letterSpacing:0.5}}><span style={{color:'#84e040'}}>{pwSuccess}</span><span style={{fontSize:16,color:'#84e040',lineHeight:1,position:'relative',top:'-1px'}}>✓</span></div>}
+            <button onClick={handlePasswordChange} disabled={pwLoading} className="signout-btn" style={{width:'100%',padding:11,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',opacity:pwLoading?0.5:1,marginTop:10}}>
+              {pwLoading ? 'Changing...' : 'Change Password'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 
   if (subPanel === 'account') return (
@@ -1524,9 +1745,9 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
           <div style={{fontSize:11,fontWeight:700,letterSpacing:4,textTransform:'uppercase',color:'#e8b84b',marginTop:18}}>Account Information</div>
         </div>
         <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'0 20px'}} />
-        <div style={{padding:'16px 20px',flex:1,overflowY:'auto'}}>
+        <div ref={scrollContainerRef} style={{padding:'16px 20px',flex:1,overflowY:'auto'}}>
 
-          <div style={{background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.13)',borderRadius:4,padding:'16px 14px',marginBottom:16}}>
+          <div style={{background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.13)',borderRadius:4,padding:'16px 14px 25px',marginBottom:28}}>
             <div style={{marginBottom:14}}>
               <div style={{display:'inline-block',fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(201,168,76,0.6)',marginBottom:4,borderBottom:'1px solid rgba(201,168,76,0.6)'}}>Member Name</div>
               <div style={{fontSize:12,fontWeight:600,color:'#f5f0e8'}}>{user.name}{user.lastName ? ' ' + user.lastName : ''}</div>
@@ -1547,59 +1768,20 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
 
           <div style={{height:1,background:'rgba(201,168,76,0.08)',marginBottom:28}} />
 
-          <button onClick={()=>{setShowPwForm(p=>!p);setPwError('');setPwSuccess('');setPwForm({current:'',next:'',confirm:''});setShowDeleteForm(false);setDeleteConfirmText('');setDeleteError('');}} onMouseEnter={e=>{if(!showPwForm)e.currentTarget.style.background='rgba(232,184,75,0.06)';}} onMouseLeave={e=>{if(!showPwForm)e.currentTarget.style.background='rgba(8,18,36,0.6)';}} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:showPwForm?'rgba(232,184,75,0.06)':'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:4,width:'100%',cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)',userSelect:'none'}}>
-            <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(180,175,170,0.7)'}}>Change Password</span>
-            <span style={{fontSize:14,color:'rgba(245,240,232,0.3)',transform:showPwForm?'rotate(90deg)':'none',transition:'transform 0.2s ease'}}>›</span>
-          </button>
-          {showPwForm&&(
-            <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:10}}>
-              <div><label style={labelStyle}>Current Password</label><input style={inputStyle} type="password" placeholder="" value={pwForm.current} onChange={e=>setPwForm(p=>({...p,current:e.target.value}))}/></div>
-              <div><label style={labelStyle}>New Password</label><input style={inputStyle} type="password" placeholder="" value={pwForm.next} onChange={e=>{setPwForm(p=>({...p,next:e.target.value}));setPwError('');}} />{pwForm.next.length > 0 && pwForm.next.length < 8 && <div style={{fontSize:11,color:'#e02247',marginTop:5,letterSpacing:0.5}}>Minimum 8 characters required</div>}</div>
-              <div style={{marginTop:10}}><label style={labelStyle}>Confirm New Password</label><input style={inputStyle} type="password" placeholder="" value={pwForm.confirm} onChange={e=>{setPwForm(p=>({...p,confirm:e.target.value}));setPwError('');}} /></div>
-              {pwError && <div style={{fontSize:11,color:'#e02247',letterSpacing:1}}>{pwError}</div>}
-              {pwSuccess && <div style={{fontSize:11,color:'#84e040',letterSpacing:1}}>{pwSuccess}</div>}
-              <button onClick={handlePasswordChange} disabled={pwLoading} style={{width:'100%',padding:11,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',opacity:pwLoading?0.5:1,marginTop:10}}>
-                {pwLoading ? 'Changing...' : 'Change Password'}
-              </button>
+          <div style={{display:'flex',flexDirection:'column',gap:28}}>
+            <div role="button" onClick={()=>{setShowEmailForm(true);setEmailError('');setEmailSuccess('');setEmailForm({next:'',confirm:''});}} onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:4,cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)',userSelect:'none'}}>
+              <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(180,175,170,0.7)'}}>Edit Account Information</span>
+              <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
             </div>
-          )}
-
-          {!showPwForm && (
-            <div style={{marginTop:28}}>
-              <button onClick={()=>{setShowDeleteForm(p=>!p);}} onMouseEnter={e=>{if(!showDeleteForm)e.currentTarget.style.background='rgba(232,184,75,0.06)';}} onMouseLeave={e=>{if(!showDeleteForm)e.currentTarget.style.background='rgba(8,18,36,0.6)';}} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:showDeleteForm?'rgba(232,184,75,0.06)':'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:showDeleteForm?'4px 4px 0 0':'4px',width:'100%',cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)',userSelect:'none'}}>
-                <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(180,175,170,0.7)'}}>Delete Account</span>
-                <span style={{fontSize:14,color:'rgba(245,240,232,0.3)',transform:showDeleteForm?'rotate(90deg)':'none',transition:'transform 0.2s ease'}}>›</span>
-              </button>
-              {showDeleteForm && (
-                <div style={{border:'1px solid rgba(201,168,76,0.35)',borderTop:'none',borderRadius:'0 0 4px 4px',padding:'12px 14px'}}>
-                  <button onClick={()=>{setShowDeleteModal(true);setDeleteConfirmText('');setDeleteError('');}} style={{width:'100%',padding:11,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>
-                    Delete Account
-                  </button>
-                </div>
-              )}
+            <div role="button" onClick={()=>{setShowPwForm(true);setPwError('');setPwSuccess('');setPwForm({current:'',next:'',confirm:''});}} onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:4,cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)',userSelect:'none'}}>
+              <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(180,175,170,0.7)'}}>Change Password</span>
+              <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
             </div>
-          )}
-
-          {showDeleteModal && (
-            <div onClick={()=>{if(!deleteLoading){setShowDeleteModal(false);setShowDeleteForm(false);setDeleteConfirmText('');setDeleteError('');}}} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',display:'flex',alignItems:'flex-start',justifyContent:'center',zIndex:400,padding:'180px 20px 0'}}>
-              <div onClick={e=>e.stopPropagation()} style={{background:'#0d1b2e',border:'1px solid rgba(201,168,76,0.3)',borderRadius:6,padding:'24px 20px',width:'100%',maxWidth:360,display:'flex',flexDirection:'column',gap:14}}>
-                <div style={{fontSize:12,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#e8b84b',textAlign:'center'}}>Delete Account</div>
-                <div style={{height:1,background:'rgba(201,168,76,0.2)'}} />
-                <div style={{fontSize:12,color:'rgba(245,240,232,0.7)',lineHeight:1.8,letterSpacing:0.3}}>This will permanently delete your account and cancel any active membership. This cannot be undone.</div>
-                <div>
-                  <label style={{fontSize:7,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(201,168,76,0.6)',marginBottom:6,display:'block'}}>Type DELETE to confirm</label>
-                  <input style={{...inputStyle,border:'1px solid rgba(201,168,76,0.35)'}} placeholder="" value={deleteConfirmText} onChange={e=>setDeleteConfirmText(e.target.value.toUpperCase())} autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
-                </div>
-                {deleteError && <div style={{fontSize:11,color:'#e02247',letterSpacing:0.5}}>{deleteError}</div>}
-                <button onClick={handleDeleteAccount} disabled={deleteConfirmText!=='DELETE'||deleteLoading} style={{width:'100%',padding:11,background:deleteConfirmText==='DELETE'?'linear-gradient(135deg,#c41e3a,#9e1830)':'rgba(100,20,30,0.4)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:deleteConfirmText==='DELETE'?'pointer':'default',opacity:deleteLoading?0.5:1,transition:'background 0.2s ease'}}>
-                  {deleteLoading ? 'Deleting...' : 'Delete Account'}
-                </button>
-                <button onClick={()=>{setShowDeleteModal(false);setShowDeleteForm(false);setDeleteConfirmText('');setDeleteError('');}} disabled={deleteLoading} className="confirm-cancel-btn dtm-label" style={{width:'100%',padding:9,background:'transparent',border:'1px solid rgba(201,168,76,0.3)',borderRadius:3,color:'#e8b84b',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>
-                  Cancel
-                </button>
-              </div>
+            <div role="button" onClick={()=>{setShowDeleteForm(true);}} onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:4,cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)',userSelect:'none'}}>
+              <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(180,175,170,0.7)'}}>Delete Account</span>
+              <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
             </div>
-          )}
+          </div>
 
         </div>
       </div>
@@ -1629,7 +1811,7 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
             <div style={{fontSize:7,fontWeight:900,letterSpacing:3,textTransform:'uppercase',color:'#e8b84b',marginTop:6,paddingLeft:3}}>Handicap</div>
           </div>
         </div>
-        <div style={{padding:'28px 20px 0',display:'flex',flexDirection:'column',gap:28,flex:1,overflow:'hidden'}}>
+        <div style={{padding:'35px 20px 0',display:'flex',flexDirection:'column',gap:35,flex:1,overflow:'hidden'}}>
           <div onClick={()=>setSubPanel('account')} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'15px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:4,cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)'}}
             onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'}
             onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'}>
@@ -1661,7 +1843,7 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
 
 // ─── Course Detail Row (smart wrap) ───────────────────────────────────────────
 // ─── App Content ───────────────────────────────────────────────────────────────
-function AppContent({ user, onSignOut, onAccountDeleted }) {
+function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
   const [tab, setTab] = useState("home");
   const [showProfile, setShowProfile] = useState(false);
   const accountBtnRef = useRef(null);
@@ -1681,6 +1863,7 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
   const [showCourseInfo, setShowCourseInfo] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [confirmPost, setConfirmPost] = useState(false);
+  const [sameDayModal, setSameDayModal] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [manualCourseEntered, setManualCourseEntered] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
@@ -1707,8 +1890,8 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
   const [golfApiFetchLoading, setGolfApiFetchLoading] = useState(false);
   const [golfApiClub, setGolfApiClub] = useState(null);
   const [selectedGolfCourse, setSelectedGolfCourse] = useState('');
-  const [golfClubName, setGolfClubName] = useState('');
   const golfSearchTimer = useRef(null);
+  const partnerSearchTimer = useRef(null);
 
   const authHeaders = () => {
     try {
@@ -1878,23 +2061,26 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
       }
       feed.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       setHomeFeed(feed.slice(0, 50));
-    } catch (e) { console.error(e); }
+    } catch {}
     setFeedLoading(false);
   };
 
-  const searchUsers = async (query) => {
+  const searchUsers = (query) => {
     if (query.length < 4) { setSearchResults([]); return; }
-    setSearchLoading(true);
-    try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?member_number=ilike.${encodeURIComponent(query)}*&select=id,name,last_name,member_number&limit=5`, { headers: await authHeadersAsync() });
-      const data = await res.json();
-      if (res.ok && Array.isArray(data)) setSearchResults(data.filter(p => p.id !== user.id));
-    } catch {}
-    setSearchLoading(false);
+    clearTimeout(partnerSearchTimer.current);
+    partnerSearchTimer.current = setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?member_number=ilike.${encodeURIComponent(query)}*&select=id,name,last_name,member_number&limit=5`, { headers: await authHeadersAsync() });
+        const data = await res.json();
+        if (res.ok && Array.isArray(data)) setSearchResults(data.filter(p => p.id !== user.id));
+      } catch {}
+      setSearchLoading(false);
+    }, 300);
   };
 
   const sendRequest = async (recipientId) => {
-    setPartnerLoading(true);
+    setPartnerLoading(recipientId);
     await fetch(`${SUPABASE_URL}/rest/v1/partners`, {
       method: 'POST',
       headers: { ...(await authHeadersAsync()), "Prefer": "return=representation" },
@@ -1927,13 +2113,15 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
 
   const respondToRequest = async (partnerId, accept) => {
     if (accept) {
-      await fetch(`${SUPABASE_URL}/rest/v1/partners?id=eq.${partnerId}&recipient_id=eq.${user.id}`, {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/partners?id=eq.${partnerId}&recipient_id=eq.${user.id}`, {
         method: 'PATCH',
         headers: { ...(await authHeadersAsync()), "Prefer": "return=representation" },
         body: JSON.stringify({ status: 'accepted' }),
       });
+      if (!res.ok) return;
     } else {
-      await fetch(`${SUPABASE_URL}/rest/v1/partners?id=eq.${partnerId}&recipient_id=eq.${user.id}`, { method: 'DELETE', headers: await authHeadersAsync() });
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/partners?id=eq.${partnerId}&recipient_id=eq.${user.id}`, { method: 'DELETE', headers: await authHeadersAsync() });
+      if (!res.ok) return;
     }
     await fetchPartners();
     if (accept) fetchHomeFeed();
@@ -2047,7 +2235,7 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
         }
         setForm({ course:"", score:"", rating:"", slope:"", tee:"", date:localDateStr() });
         setCourseSearch(""); setShowDropdown(false); setConfirmPost(false); setSelectedCourse(null);
-        setGolfApiClub(null); setSelectedGolfCourse(''); setGolfApiResults([]); setGolfClubName('');
+        setGolfApiClub(null); setSelectedGolfCourse(''); setGolfApiResults([]);
         setSaving(false); setManualCourseEntered(false);
         setAdded(true); setTimeout(() => setAdded(false), 2000);
       } else {
@@ -2146,7 +2334,7 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
     <div style={S.app} className="dtm-app-frame">
       <style>{globalStyles}</style>
 
-      {showProfile && <ProfileDrawer user={user} roundCount={rounds.length} handicap={calcHandicapDecimal(rounds)} userRounds={rounds} authHeadersAsync={authHeadersAsync} onClose={()=>setShowProfile(false)}onSignOut={onSignOut} onAccountDeleted={onAccountDeleted} onHome={()=>{setShowProfile(false);setTab('home');}} onPartnerUpdate={()=>{const fetchCount=async()=>{try{const res=await fetch(`${SUPABASE_URL}/rest/v1/partners?recipient_id=eq.${user.id}&status=eq.pending&select=id`,{headers:authHeaders()});const d=await res.json();if(res.ok&&Array.isArray(d))setPendingPartnerCount(d.length);}catch{}};fetchCount();}} />}
+      {showProfile && <ProfileDrawer user={user} roundCount={rounds.length} handicap={calcHandicapDecimal(rounds)} userRounds={rounds} authHeadersAsync={authHeadersAsync} onClose={()=>setShowProfile(false)}onSignOut={onSignOut} onAccountDeleted={onAccountDeleted} onUserUpdate={onUserUpdate} onHome={()=>{setShowProfile(false);setTab('home');}} onPartnerUpdate={()=>{const fetchCount=async()=>{try{const res=await fetch(`${SUPABASE_URL}/rest/v1/partners?recipient_id=eq.${user.id}&status=eq.pending&select=id`,{headers:authHeaders()});const d=await res.json();if(res.ok&&Array.isArray(d))setPendingPartnerCount(d.length);}catch{}};fetchCount();}} />}
 
       {pendingDelete && (
         <div onClick={()=>setPendingDelete(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:999}}>
@@ -2164,7 +2352,7 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
       {/* Round Detail Sheet */}
       {selectedRound && (
         <div onClick={()=>setSelectedRound(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:999}}>
-          <div onClick={e=>e.stopPropagation()} style={{position:'relative',background:'#0d1b2e',border:'1px solid rgba(232,184,75,0.3)',borderRadius:'10px 10px 0 0',padding:'28px 24px 80px',width:'100%',maxWidth:480,minHeight:'85vh',maxHeight:'85vh',overflowY:'auto'}}>
+          <div onClick={e=>e.stopPropagation()} style={{position:'relative',background:'#0d1b2e',border:'1px solid rgba(232,184,75,0.3)',borderBottom:'none',borderRadius:'10px 10px 0 0',padding:'28px 24px 80px',width:'100%',maxWidth:480,minHeight:'85vh',maxHeight:'85vh',overflowY:'auto'}}>
 
             {/* Title */}
             <div style={{fontSize:16,fontWeight:800,letterSpacing:3,textTransform:'uppercase',color:'#e8b84b',textAlign:'center',marginBottom:16}}>Round Detail</div>
@@ -2188,6 +2376,25 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
             ))}
 
             <button onClick={()=>setSelectedRound(null)} style={{position:'absolute',bottom:20,left:24,right:24,padding:'12px 0',background:'transparent',border:'1px solid rgba(201,168,76,0.4)',borderRadius:4,color:'#e8b84b',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {sameDayModal && (
+        <div onClick={()=>setSameDayModal(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:999}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'#0d1b2e',border:'1px solid rgba(232,184,75,0.4)',borderRadius:6,padding:'28px 24px',maxWidth:320,width:'90%',textAlign:'center'}}>
+            <div style={{fontSize:12,letterSpacing:3,textTransform:'uppercase',color:'#e8b84b',marginBottom:16}}>Same Day Round?</div>
+            <div style={{fontSize:13,color:'rgba(245,240,232,0.7)',lineHeight:1.7,marginBottom:8}}>
+              You already have a round posted on<br/>
+              <span style={{color:'#f5f0e8',fontWeight:600,display:'block',textAlign:'center',marginTop:4}}>{new Date(form.date+'T00:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</span>
+            </div>
+            <div style={{fontSize:13,color:'rgba(245,240,232,0.7)',lineHeight:1.7,marginBottom:20}}>
+              Is this round also from that date?<br/>Please make sure the date of your round is correct — it directly affects your handicap calculation.
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:11}}>
+              <button className="confirm-post-btn" style={{...S.btn,margin:0,padding:10,fontWeight:700,letterSpacing:1}} onClick={()=>{setSameDayModal(false);setConfirmPost(true);}}>Yes, Same Day</button>
+              <button className="confirm-cancel-btn dtm-label" style={{...S.btnGhost,width:'100%',padding:10,color:'#e8b84b'}} onClick={()=>setSameDayModal(false)}>No, Change Date</button>
+            </div>
           </div>
         </div>
       )}
@@ -2303,7 +2510,7 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
             {feedLoading
               ? <div style={{fontSize:11,color:'rgba(245,240,232,0.3)',fontStyle:'italic',paddingLeft:2}}>Loading...</div>
               : homeFeed.length === 0
-                ? <div style={{fontSize:12,color:'rgba(245,240,232,0.3)',fontStyle:'italic',paddingLeft:2,lineHeight:1.7}}>No news to share. Somebody make a tee time!</div>
+                ? <div style={{fontSize:12,color:'rgba(245,240,232,0.3)',fontStyle:'italic',paddingLeft:2,lineHeight:1.7}}>No news to share.{partners.length > 0 && ' Somebody make a tee time!'}</div>
                 : homeFeed.map(item => {
                     const timeAgo = (dateStr) => {
                       const diff = Math.max(0, Math.floor((Date.now() - new Date(dateStr)) / 86400000));
@@ -2514,7 +2721,7 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
                 </div>
               </div>
             </div>
-            <button style={{...S.btn,opacity:(!form.score||!form.rating)?0.4:1,background:added?'linear-gradient(135deg,#4caa18,#2d7a0e)':S.btn.background}} onClick={()=>setConfirmPost(true)} disabled={!form.score||!form.rating}>
+            <button style={{...S.btn,opacity:(!form.score||!form.rating)?0.4:1,background:added?'linear-gradient(135deg,#4caa18,#2d7a0e)':S.btn.background}} onClick={()=>{if(!form.score||!form.rating)return;const hasSameDay=rounds.some(r=>r.date===form.date);if(hasSameDay){setSameDayModal(true);}else{setConfirmPost(true);}}} disabled={!form.score||!form.rating}>
               {added?"✓ Round Posted":"Post Round"}
             </button>
           </div>
@@ -2645,7 +2852,7 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
                 })()}
               </div>
               {withVal.length===0&&(
-                <div style={{...S.card,background:'rgba(8,18,36,0.6)',textAlign:'center',position:'relative'}}><span className="info-tooltip" onClick={e=>{e.stopPropagation();e.currentTarget.classList.toggle('active');}} style={{position:'absolute',top:5,right:7}}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="rgba(245,240,232,0.7)" strokeWidth="1.5"/><line x1="12" y1="11" x2="12" y2="17" stroke="rgba(245,240,232,0.7)" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="1" fill="rgba(245,240,232,0.7)"/></svg><span className="tooltip-text" style={{bottom:'3px',top:'auto',left:'auto',right:'-8px',transform:'none',width:168,textAlign:'center',lineHeight:'1.5',padding:'6px 10px',whiteSpace:'normal',textTransform:'none',fontWeight:400,letterSpacing:'0.3px'}}>Chart values are based on<br/>end of month handicap</span></span>
+                <div style={{...S.card,background:'rgba(8,18,36,0.6)',textAlign:'center',position:'relative'}}><span className="info-tooltip" onClick={e=>{e.stopPropagation();e.currentTarget.classList.toggle('active');}} style={{position:'absolute',top:5,right:7}}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="rgba(245,240,232,0.7)" strokeWidth="1.5"/><line x1="12" y1="11" x2="12" y2="17" stroke="rgba(245,240,232,0.7)" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="1" fill="rgba(245,240,232,0.7)"/></svg><span className="tooltip-text" style={{bottom:'3px',top:'auto',left:'auto',right:'-8px',transform:'none',width:168,textAlign:'center',lineHeight:'1.5',padding:'6px 10px',whiteSpace:'normal',textTransform:'none',letterSpacing:'0.3px'}}>Chart values are based on<br/>end of month handicap</span></span>
                   <div style={{...S.cardTitle,textAlign:'center',marginBottom:12}}>Handicap Trend (<span className="ttm-tooltip">TTM<span className="tooltip-text" style={{textTransform:"none"}}>Trailing Twelve Months</span></span>)</div>
                   <div style={{padding:'20px 0 12px',display:'flex',flexDirection:'column',alignItems:'center',gap:10}}>
                     <svg width="48" height="32" viewBox="0 0 48 32" fill="none">
@@ -2672,7 +2879,7 @@ function AppContent({ user, onSignOut, onAccountDeleted }) {
                   segments.push({x1:a.x,y1:a.y,x2:b.x,y2:b.y,color:isSegMax?'#e02247':isSegMin?'#84e040':'#e8b84b'});
                 }
                 return(
-                  <div style={{...S.card,background:'rgba(8,18,36,0.6)',position:'relative'}}><span className="info-tooltip" onClick={e=>{e.stopPropagation();e.currentTarget.classList.toggle('active');}} style={{position:'absolute',top:5,right:7}}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="rgba(245,240,232,0.7)" strokeWidth="1.5"/><line x1="12" y1="11" x2="12" y2="17" stroke="rgba(245,240,232,0.7)" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="1" fill="rgba(245,240,232,0.7)"/></svg><span className="tooltip-text" style={{bottom:'3px',top:'auto',left:'auto',right:'-8px',transform:'none',width:168,textAlign:'center',lineHeight:'1.5',padding:'6px 10px',whiteSpace:'normal',textTransform:'none',fontWeight:400,letterSpacing:'0.3px'}}>Chart values are based on<br/>end of month handicap</span></span>
+                  <div style={{...S.card,background:'rgba(8,18,36,0.6)',position:'relative'}}><span className="info-tooltip" onClick={e=>{e.stopPropagation();e.currentTarget.classList.toggle('active');}} style={{position:'absolute',top:5,right:7}}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="rgba(245,240,232,0.7)" strokeWidth="1.5"/><line x1="12" y1="11" x2="12" y2="17" stroke="rgba(245,240,232,0.7)" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="1" fill="rgba(245,240,232,0.7)"/></svg><span className="tooltip-text" style={{bottom:'3px',top:'auto',left:'auto',right:'-8px',transform:'none',width:168,textAlign:'center',lineHeight:'1.5',padding:'6px 10px',whiteSpace:'normal',textTransform:'none',letterSpacing:'0.3px'}}>Chart values are based on<br/>end of month handicap</span></span>
                     <div style={{...S.cardTitle,textAlign:'center'}}>Handicap Trend (<span className="ttm-tooltip">TTM<span className="tooltip-text" style={{textTransform:"none"}}>Trailing Twelve Months</span></span>)</div>
                     <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',display:'block'}}>
                       <line x1={AXIS_X} y1={H-PAD_B} x2={W} y2={H-PAD_B} stroke="rgba(245,240,232,0.15)" strokeWidth="1" strokeDasharray="3,3"/>
@@ -2740,6 +2947,7 @@ export default function GolfHandicapApp() {
   const [authUser, setAuthUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [welcomeUser, setWelcomeUser] = useState(null);
+  const skipSessionRestore = useRef(false);
 
   const restHeaders = () => {
     try {
@@ -2753,13 +2961,16 @@ export default function GolfHandicapApp() {
   const [verifiedUser, setVerifiedUser] = useState(null);
   const [forceLogin, setForceLogin] = useState(false);
   const [preFillMemberNumber, setPreFillMemberNumber] = useState('');
+  const [preFillNonce, setPreFillNonce] = useState(0);
   const [fromEmailLink, setFromEmailLink] = useState(false);
   const [reactivationReturn, setReactivationReturn] = useState(false);
-  const [resetToken, setResetToken] = useState(() => localStorage.getItem('dtm-reset-token') || null);
+  const [resetToken, setResetToken] = useState(() => window.Capacitor?.isNativePlatform?.() ? null : (localStorage.getItem('dtm-reset-token') || null));
+  const [exchangeError, setExchangeError] = useState(null);
+  const universalCodePending = useRef(false);
 
   useEffect(() => {
     if (!window.Capacitor?.isNativePlatform?.()) return;
-    Purchases.configure({ apiKey: RC_API_KEY });
+    try { Purchases.configure({ apiKey: RC_API_KEY }); } catch {}
     let listener;
     const handleVerifiedUrl = async (url) => {
       try {
@@ -2795,23 +3006,118 @@ export default function GolfHandicapApp() {
         }
       } catch {}
     };
+    const handleResetUrl = (url) => {
+      const token = decodeURIComponent(new URLSearchParams(url.split('?')[1] || '').get('token') || '');
+      if (!token) return;
+      setResetToken(token);
+      setAuthLoading(false);
+    };
+    const handleUniversalVerifyCode = async (url) => {
+      if (universalCodePending.current) return;
+      universalCodePending.current = true;
+      try {
+        const code = new URLSearchParams(url.split('?')[1] || '').get('code');
+        const hash = url.split('#')[1] || '';
+        const hashParams = new URLSearchParams(hash);
+        const hashToken = hashParams.get('access_token');
+        const hashType = hashParams.get('type');
+        let accessToken = null;
+        let userData = null;
+        if (code) {
+          const exchangeRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+            body: JSON.stringify({ auth_code: code, code_verifier: localStorage.getItem('pkce_verifier') || '' })
+          });
+          const exchangeData = await exchangeRes.json();
+          if (!exchangeRes.ok || !exchangeData?.access_token) {
+            setExchangeError(`Exchange failed (${exchangeRes.status}): ${JSON.stringify(exchangeData)}`);
+            universalCodePending.current = false;
+            setAuthLoading(false);
+            return;
+          }
+          accessToken = exchangeData.access_token;
+          userData = exchangeData.user;
+          const session = { access_token: accessToken, refresh_token: exchangeData.refresh_token || null, expires_at: exchangeData.expires_in ? Math.floor(Date.now()/1000) + exchangeData.expires_in : null, user: userData };
+          localStorage.setItem('sb-session', JSON.stringify(session));
+        } else if (hashToken) {
+          accessToken = hashToken;
+          if (hashType === 'recovery') {
+            setAuthUser(null);
+            setWelcomeUser(null);
+            setResetToken(accessToken);
+            universalCodePending.current = false;
+            setAuthLoading(false);
+            return;
+          }
+          const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${accessToken}` }
+          });
+          if (!userRes.ok) {
+            setExchangeError(`User fetch failed (${userRes.status})`);
+            universalCodePending.current = false;
+            setAuthLoading(false);
+            return;
+          }
+          userData = await userRes.json();
+          localStorage.setItem('sb-session', JSON.stringify({ access_token: accessToken, user: userData }));
+        } else {
+          setExchangeError(`No code or token found in URL: ${url.substring(0,120)}`);
+          universalCodePending.current = false;
+          setAuthLoading(false);
+          return;
+        }
+        let profile = null;
+        try {
+          const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userData.id}&select=*`, {
+            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/vnd.pgrst.object+json' }
+          });
+          if (profRes.ok) profile = await profRes.json();
+        } catch {}
+        if (profile?.subscribed) {
+          setAuthUser(null);
+          setWelcomeUser(null);
+          setResetToken(accessToken);
+        } else {
+          await Purchases.logIn({ appUserID: userData.id }).catch(() => {});
+          setForceLogin(false);
+          setAuthUser({ id: userData.id, name: profile?.name || userData.raw_user_meta_data?.name || '', lastName: profile?.last_name || userData.raw_user_meta_data?.last_name || '', email: profile?.email || userData.email, memberNumber: profile?.member_number || null, createdAt: profile?.created_at || null, subscribed: false, subscriptionRenewsAt: null, stripeCustomerId: profile?.stripe_customer_id || null, paymentProvider: profile?.payment_provider || null });
+        }
+      } catch (e) {
+        setExchangeError(`Error: ${e?.message || String(e)}`);
+      }
+      universalCodePending.current = false;
+      setAuthLoading(false);
+    };
+    const dispatchUniversalUrl = (url) => {
+      if (!url) return false;
+      const hasCode = new URLSearchParams(url.split('?')[1] || '').get('code');
+      const hasHashToken = url.includes('#access_token=');
+      if (hasCode || hasHashToken) { skipSessionRestore.current = true; handleUniversalVerifyCode(url); return true; }
+      return false;
+    };
     CapApp.getLaunchUrl().then(result => {
       if (!result?.url) return;
       if (result.url.includes('payment/reactivated')) handleReactivationUrl();
       else if (result.url.includes('verified')) handleVerifiedUrl(result.url);
+      else if (result.url.includes('reset?token')) handleResetUrl(result.url);
       else {
+        if (dispatchUniversalUrl(result.url)) return;
         const mn = new URLSearchParams(result.url.split('?')[1] || '').get('memberNumber');
-        if (mn) setPreFillMemberNumber(mn);
+        if (mn) { setPreFillMemberNumber(mn); setPreFillNonce(n => n + 1); skipSessionRestore.current = true; }
         setForceLogin(true);
+        setAuthLoading(false);
       }
     }).catch(() => {});
     CapApp.addListener('appUrlOpen', async (data) => {
       try { await Browser.close(); } catch {}
       if (data.url?.includes('payment/reactivated')) handleReactivationUrl();
       else if (data.url?.includes('verified')) handleVerifiedUrl(data.url);
+      else if (data.url?.includes('reset?token')) handleResetUrl(data.url);
       else {
+        if (dispatchUniversalUrl(data.url)) return;
         const mn = new URLSearchParams(data.url?.split('?')[1] || '').get('memberNumber');
-        if (mn) setPreFillMemberNumber(mn);
+        if (mn) { setPreFillMemberNumber(mn); setPreFillNonce(n => n + 1); setAuthUser(null); setWelcomeUser(null); }
         setForceLogin(true);
       }
     }).then(l => { listener = l; }).catch(() => {});
@@ -2820,15 +3126,27 @@ export default function GolfHandicapApp() {
 
   useEffect(() => {
     const restoreSession = async () => {
+      if (window.Capacitor?.isNativePlatform?.()) await new Promise(r => setTimeout(r, 150));
+      if (skipSessionRestore.current) { return; }
       try {
         // Check for PKCE code flow (new Supabase default)
         const urlParams = new URLSearchParams(window.location.search);
         const screenParam = urlParams.get('screen');
-        if (screenParam === 'login' || window.location.pathname === '/login') {
+        if ((screenParam === 'login' || window.location.pathname === '/login') && !urlParams.get('code') && !window.location.hash.includes('type=recovery')) {
+          const mn = urlParams.get('memberNumber');
+          if (mn) setPreFillMemberNumber(mn);
           window.history.replaceState(null, '', '/');
           setAuthLoading(false);
           setForceLogin(true);
           setFromEmailLink(true);
+          return;
+        }
+        const mnParam = urlParams.get('memberNumber');
+        if (mnParam && !window.Capacitor?.isNativePlatform?.()) {
+          setPreFillMemberNumber(mnParam);
+          window.history.replaceState(null, '', '/');
+          setAuthLoading(false);
+          setForceLogin(true);
           return;
         }
         const paymentStatus = urlParams.get('payment');
@@ -2963,22 +3281,13 @@ export default function GolfHandicapApp() {
               setVerifiedUser(pendingUser);
               return;
             }
-            // Email confirmed but not paid — on iPhone redirect to native app for IAP, else Stripe
+            // Email confirmed but not paid — on iPhone redirect to native app for IAP, else show choice screen
             if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
               const _deepLink = `dtmhandicap://verified?token=${encodeURIComponent(accessToken)}&userId=${encodeURIComponent(userData.id)}`;
-              window.location.href = _deepLink;
-              setTimeout(() => { document.open(); document.write('<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#0d1b2e;min-height:100vh}</style></head><body></body></html>'); document.close(); }, 500);
+              showVerifiedPage(_deepLink);
               return;
             }
-            try {
-              const res = await fetch(`${API_BASE}/api/create-checkout-session`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: userData.email, userId: userData.id }),
-              });
-              const data = await res.json();
-              if (data.url) { window.location.href = data.url; return; }
-            } catch (e) { console.error('Checkout error:', e); }
+            setAuthUser({ id: userData.id, name: profile.name || userData.raw_user_meta_data?.name || '', lastName: profile.last_name || userData.raw_user_meta_data?.last_name || '', email: profile.email || userData.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: false, subscriptionRenewsAt: null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null });
             setAuthLoading(false);
             return;
           }
@@ -2993,9 +3302,13 @@ export default function GolfHandicapApp() {
           const refreshToken = params.get('refresh_token');
           const type = params.get('type');
           if (accessToken && type === 'recovery') {
-            // Password reset link — save token and show reset screen
-            localStorage.setItem('dtm-reset-token', accessToken);
             window.history.replaceState(null, '', window.location.pathname);
+            if (/iPhone|iPad|iPod/.test(navigator.userAgent) && !window.Capacitor?.isNativePlatform?.()) {
+              window.location.href = `dtmhandicap://reset?token=${encodeURIComponent(accessToken)}`;
+              setTimeout(() => { document.open(); document.write('<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#0d1b2e;min-height:100vh}</style></head><body></body></html>'); document.close(); }, 500);
+              return;
+            }
+            localStorage.setItem('dtm-reset-token', accessToken);
             setAuthLoading(false);
             setResetToken(accessToken);
             return;
@@ -3025,19 +3338,12 @@ export default function GolfHandicapApp() {
                 if (!profile.subscribed) {
                   if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
                     const _deepLink = `dtmhandicap://verified?token=${encodeURIComponent(accessToken)}&userId=${encodeURIComponent(userData.id)}`;
-                    window.location.href = _deepLink;
-                    setTimeout(() => { document.open(); document.write('<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#0d1b2e;min-height:100vh}</style></head><body></body></html>'); document.close(); }, 500);
+                    showVerifiedPage(_deepLink);
                     return;
                   }
-                  try {
-                    const res = await fetch(`${API_BASE}/api/create-checkout-session`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ email: profile.email || userData.email, userId: userData.id }),
-                    });
-                    const data = await res.json();
-                    if (data.url) { window.location.href = data.url; return; }
-                  } catch (e) { console.error('Checkout error:', e); }
+                  setAuthUser({ id: userData.id, name: profile.name || userData.raw_user_meta_data?.name || '', lastName: profile.last_name || userData.raw_user_meta_data?.last_name || '', email: profile.email || userData.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: false, subscriptionRenewsAt: null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null });
+                  setAuthLoading(false);
+                  return;
                 }
                 const pendingUser = { id: userData.id, name: profile.name || userData.raw_user_meta_data?.name || '', lastName: profile.last_name || userData.raw_user_meta_data?.last_name || '', email: profile.email || userData.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: profile.subscribed || false, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null };
                 setAuthLoading(false);
@@ -3081,17 +3387,30 @@ export default function GolfHandicapApp() {
                 // iPhone + unsubscribed in web Safari → send to native app (handles retries on second verify tap)
                 if (!profile.subscribed && !window.Capacitor?.isNativePlatform?.() && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
                   const _dl = `dtmhandicap://verified?token=${encodeURIComponent(token)}&userId=${encodeURIComponent(s.user.id)}`;
-                  window.location.href = _dl;
-                  setTimeout(() => { document.open(); document.write('<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#0d1b2e;min-height:100vh}</style></head><body></body></html>'); document.close(); }, 500);
+                  showVerifiedPage(_dl);
                   return;
                 }
-                setAuthUser({ id: s.user.id, name: profile.name || '', lastName: profile.last_name || '', email: profile.email || s.user.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: profile.subscribed || false, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null });
+                let subscribedStatus = profile.subscribed || false;
+                if (subscribedStatus && profile.payment_provider === 'apple' && window.Capacitor?.isNativePlatform?.()) {
+                  try {
+                    const { customerInfo } = await Purchases.getCustomerInfo();
+                    if (!(customerInfo?.activeSubscriptions?.length > 0)) {
+                      subscribedStatus = false;
+                      fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${s.user.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ subscribed: false })
+                      }).catch(() => {});
+                    }
+                  } catch {}
+                }
+                setAuthUser({ id: s.user.id, name: profile.name || '', lastName: profile.last_name || '', email: profile.email || s.user.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: subscribedStatus, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null });
               }
             }
           }
         }
       } catch {}
-      setAuthLoading(false);
+      if (!universalCodePending.current) setAuthLoading(false);
     };
     restoreSession();
   }, []);
@@ -3129,19 +3448,23 @@ export default function GolfHandicapApp() {
   if (authLoading) return (
     <div style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',display:'flex',alignItems:'center',justifyContent:'center'}}>
       <style>{globalStyles}</style>
-      <div style={{fontSize:10,letterSpacing:3,textTransform:'uppercase',fontWeight:700,color:'#e8b84b'}}>Loading...</div>
+      <div style={{width:36,height:36,border:'3px solid rgba(232,184,75,0.2)',borderTopColor:'#e8b84b',borderRadius:'50%',animation:'dtm-spin 0.8s linear infinite'}} />
+    </div>
+  );
+  if (exchangeError) return (
+    <div style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'24px'}}>
+      <style>{globalStyles}</style>
+      <div style={{color:'#e02247',fontSize:12,fontWeight:700,letterSpacing:2,textTransform:'uppercase',marginBottom:12}}>Verification Error</div>
+      <div style={{color:'rgba(245,240,232,0.75)',fontSize:13,lineHeight:1.6,textAlign:'center',marginBottom:24,wordBreak:'break-all'}}>{exchangeError}</div>
+      <button onClick={()=>setExchangeError(null)} style={{background:'none',border:'1px solid rgba(245,240,232,0.2)',borderRadius:4,color:'rgba(245,240,232,0.5)',fontSize:12,letterSpacing:2,textTransform:'uppercase',padding:'12px 24px',cursor:'pointer'}}>Dismiss</button>
     </div>
   );
 
   if (welcomeUser) return (
     <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
       <style>{globalStyles}</style>
-      <div style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'flex-start',padding:'32px 28px 40px'}}>
-        <div style={{marginBottom:0,textAlign:'center'}}>
-          <div style={{fontSize:27,fontWeight:900,color:'#f5f0e8',letterSpacing:5.5,textTransform:'uppercase',lineHeight:1.1,marginBottom:0,whiteSpace:'nowrap',fontFamily:'Verdana,sans-serif'}}>Down The Middle</div>
-          <div style={{fontSize:15,fontWeight:700,letterSpacing:3.75,textTransform:'uppercase',color:'#e02247',marginTop:5.5,marginLeft:-6.5,fontFamily:'Verdana,sans-serif'}}>A Truer Golf Handicap</div>
-        </div>
-        <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'24px 0 20px'}}/>
+      <AppHeader />
+      <div style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'flex-start',padding:'4px 28px 40px'}}>
         <div style={{display:'flex',flexDirection:'column',gap:22}}>
           <p style={{margin:0,fontSize:18,color:'#e8b84b',lineHeight:1.75,fontWeight:700,textAlign:'center',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>Welcome, {welcomeUser.name}!</p>
           <p style={{margin:0,fontSize:14.5,color:'rgba(245,240,232,0.9)',lineHeight:1.75,fontWeight:400}}>
@@ -3162,11 +3485,12 @@ export default function GolfHandicapApp() {
               setPreFillMemberNumber(welcomeUser.memberNumber);
               setWelcomeUser(null);
               setAuthUser(null);
+              setForceLogin(true);
             }
           }}>
             Get Started
           </button>
-          {/iPhone|iPad|iPod/.test(navigator.userAgent) && (
+          {/iPhone|iPad|iPod/.test(navigator.userAgent) && !window.Capacitor?.isNativePlatform?.() && (
             <div style={{textAlign:'center',marginTop:13}}>
               <span onClick={()=>{ setPreFillMemberNumber(welcomeUser.memberNumber); setWelcomeUser(null); setForceLogin(true); }} style={{fontSize:12,color:'rgba(245,240,232,0.35)',cursor:'pointer',textDecoration:'underline',letterSpacing:0.5}}>Continue in browser instead</span>
             </div>
@@ -3175,17 +3499,17 @@ export default function GolfHandicapApp() {
       </div>
     </div>
   );
-  if (!authUser) return <AuthScreen onAuth={setAuthUser} verifiedEmail={verifiedEmail} verifiedUser={verifiedUser} resetToken={resetToken} forceLogin={forceLogin} onForceLoginClear={() => setForceLogin(false)} onResetComplete={() => { localStorage.removeItem('dtm-reset-token'); setResetToken(null); }} fromEmailLink={fromEmailLink} onEmailLinkClear={() => setFromEmailLink(false)} onShowAppBanner={() => setFromEmailLink(true)} reactivationReturn={reactivationReturn} onReactivationDismiss={() => setReactivationReturn(false)} preFillMemberNumber={preFillMemberNumber} />;
+  if (!authUser) return <AuthScreen onAuth={setAuthUser} verifiedEmail={verifiedEmail} verifiedUser={verifiedUser} resetToken={resetToken} forceLogin={forceLogin} onForceLoginClear={() => setForceLogin(false)} onResetComplete={() => { localStorage.removeItem('dtm-reset-token'); setResetToken(null); }} fromEmailLink={fromEmailLink} onEmailLinkClear={() => setFromEmailLink(false)} onShowAppBanner={() => setFromEmailLink(true)} reactivationReturn={reactivationReturn} onReactivationDismiss={() => setReactivationReturn(false)} preFillMemberNumber={preFillMemberNumber} preFillNonce={preFillNonce} />;
   // SUBSCRIPTION GATE — re-enabled for live payments.
   if (!authUser.subscribed) return (
     <div style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',alignItems:'center',justifyContent:'center'}}>
       <style>{globalStyles}</style>
-      <CheckoutRedirect session={JSON.parse(localStorage.getItem('sb-session')||'null')} handleSignOut={handleSignOut} user={authUser} onReactivated={setAuthUser} onNativePurchaseSuccess={(u) => { setAuthUser(u); setWelcomeUser(u); }} />
+      <CheckoutRedirect session={JSON.parse(localStorage.getItem('sb-session')||'null')} handleSignOut={handleSignOut} user={authUser} onReactivated={setAuthUser} onNativePurchaseSuccess={(u) => { localStorage.removeItem('sb-session'); setWelcomeUser(u); }} />
     </div>
   );
   return (
     <>
-      <AppContent user={authUser} onSignOut={handleSignOut} onAccountDeleted={handleAccountDeleted} />
+      <AppContent user={authUser} onSignOut={handleSignOut} onAccountDeleted={handleAccountDeleted} onUserUpdate={u => setAuthUser(u)} />
       <Analytics />
       {reactivationReturn && (
         <div style={{position:'fixed',inset:0,zIndex:999,display:'flex',flexDirection:'column',justifyContent:'flex-end'}}>

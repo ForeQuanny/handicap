@@ -70,7 +70,7 @@ export default async function handler(req, res) {
       console.error('Could not retrieve customer address:', e.message);
     }
 
-    const updateRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`, {
+    await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -85,33 +85,30 @@ export default async function handler(req, res) {
         ...locationData,
       }),
     });
-    console.log('Supabase update status (checkout):', updateRes.status);
   }
 
   // Subscription cancelled
   if (event.type === 'customer.subscription.deleted') {
     const subscription = event.data.object;
     const customerId = subscription.customer;
-    const updateRes = await supabaseUpdate(customerId, {
+    await supabaseUpdate(customerId, {
       subscribed: false,
       subscription_renews_at: null,
     });
-    console.log('Supabase update status (cancelled):', updateRes.status);
   }
 
   // Subscription renewed or reactivated
   if (event.type === 'customer.subscription.updated') {
     const subscription = event.data.object;
     const customerId = subscription.customer;
-    const isActive = subscription.status === 'active';
+    const isActive = subscription.status === 'active' || subscription.status === 'past_due';
     const renewsAt = isActive
       ? new Date(subscription.current_period_end * 1000).toISOString()
       : null;
-    const updateRes = await supabaseUpdate(customerId, {
+    await supabaseUpdate(customerId, {
       subscribed: isActive,
       subscription_renews_at: renewsAt,
     });
-    console.log('Supabase update status (updated):', updateRes.status);
   }
 
   res.status(200).json({ received: true });

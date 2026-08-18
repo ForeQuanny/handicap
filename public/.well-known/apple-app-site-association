@@ -1,6 +1,11 @@
 {
   "applinks": {
     "apps": [],
-    "details": []
+    "details": [
+      {
+        "appID": "3THVHL6Q77.com.dtmhandicap.app",
+        "paths": ["/", "/open.html"]
+      }
+    ]
   }
 }
