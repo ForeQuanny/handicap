@@ -1533,7 +1533,7 @@ const [showDeleteForm, setShowDeleteForm] = useState(false);
       const data = await res.json();
       if (!res.ok) { setDeleteError(data.error || 'Deletion failed — please try again.'); setDeleteLoading(false); return; }
       localStorage.removeItem('sb-session');
-      localStorage.removeItem('dtm-reset-token');
+      sessionStorage.removeItem('dtm-reset-token');
       onAccountDeleted();
     } catch {
       setDeleteError('Something went wrong — please try again.');
@@ -2964,7 +2964,7 @@ export default function GolfHandicapApp() {
   const [preFillNonce, setPreFillNonce] = useState(0);
   const [fromEmailLink, setFromEmailLink] = useState(false);
   const [reactivationReturn, setReactivationReturn] = useState(false);
-  const [resetToken, setResetToken] = useState(() => window.Capacitor?.isNativePlatform?.() ? null : (localStorage.getItem('dtm-reset-token') || null));
+  const [resetToken, setResetToken] = useState(() => window.Capacitor?.isNativePlatform?.() ? null : (sessionStorage.getItem('dtm-reset-token') || null));
   const [exchangeError, setExchangeError] = useState(null);
   const universalCodePending = useRef(false);
 
@@ -3308,7 +3308,7 @@ export default function GolfHandicapApp() {
               setTimeout(() => { document.open(); document.write('<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#0d1b2e;min-height:100vh}</style></head><body></body></html>'); document.close(); }, 500);
               return;
             }
-            localStorage.setItem('dtm-reset-token', accessToken);
+            sessionStorage.setItem('dtm-reset-token', accessToken);
             setAuthLoading(false);
             setResetToken(accessToken);
             return;
@@ -3499,7 +3499,7 @@ export default function GolfHandicapApp() {
       </div>
     </div>
   );
-  if (!authUser) return <AuthScreen onAuth={setAuthUser} verifiedEmail={verifiedEmail} verifiedUser={verifiedUser} resetToken={resetToken} forceLogin={forceLogin} onForceLoginClear={() => setForceLogin(false)} onResetComplete={() => { localStorage.removeItem('dtm-reset-token'); setResetToken(null); }} fromEmailLink={fromEmailLink} onEmailLinkClear={() => setFromEmailLink(false)} onShowAppBanner={() => setFromEmailLink(true)} reactivationReturn={reactivationReturn} onReactivationDismiss={() => setReactivationReturn(false)} preFillMemberNumber={preFillMemberNumber} preFillNonce={preFillNonce} />;
+  if (!authUser) return <AuthScreen onAuth={setAuthUser} verifiedEmail={verifiedEmail} verifiedUser={verifiedUser} resetToken={resetToken} forceLogin={forceLogin} onForceLoginClear={() => setForceLogin(false)} onResetComplete={() => { sessionStorage.removeItem('dtm-reset-token'); setResetToken(null); }} fromEmailLink={fromEmailLink} onEmailLinkClear={() => setFromEmailLink(false)} onShowAppBanner={() => setFromEmailLink(true)} reactivationReturn={reactivationReturn} onReactivationDismiss={() => setReactivationReturn(false)} preFillMemberNumber={preFillMemberNumber} preFillNonce={preFillNonce} />;
   // SUBSCRIPTION GATE — re-enabled for live payments.
   if (!authUser.subscribed) return (
     <div style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',alignItems:'center',justifyContent:'center'}}>
