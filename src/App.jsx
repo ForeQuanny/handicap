@@ -3143,7 +3143,6 @@ export default function GolfHandicapApp() {
         }
         if (screenParam === 'signup' && !urlParams.get('code') && !window.location.hash.includes('type=recovery')) {
           setAuthLoading(false);
-          setForceLogin(true);
           return;
         }
         const mnParam = urlParams.get('memberNumber');
