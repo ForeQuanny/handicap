@@ -3141,6 +3141,11 @@ export default function GolfHandicapApp() {
           setFromEmailLink(true);
           return;
         }
+        if (screenParam === 'signup' && !urlParams.get('code') && !window.location.hash.includes('type=recovery')) {
+          setAuthLoading(false);
+          setForceLogin(true);
+          return;
+        }
         const mnParam = urlParams.get('memberNumber');
         if (mnParam && !window.Capacitor?.isNativePlatform?.()) {
           setPreFillMemberNumber(mnParam);
