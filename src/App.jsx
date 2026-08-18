@@ -361,7 +361,7 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
   return (
     <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',alignItems:'center',justifyContent:'center'}}>
       <style>{globalStyles}</style>
-      <div style={{color:'rgba(245,240,232,0.4)',fontSize:12,letterSpacing:2,textTransform:'uppercase'}}>Redirecting to checkout…</div>
+      <div style={{color:'#e8b84b',fontSize:12,letterSpacing:2,textTransform:'uppercase'}}>Redirecting to checkout…</div>
     </div>
   );
 }
