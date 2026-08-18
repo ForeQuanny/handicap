@@ -3144,7 +3144,6 @@ export default function GolfHandicapApp() {
           window.history.replaceState(null, '', '/');
           setAuthLoading(false);
           setForceLogin(true);
-          setFromEmailLink(true);
           return;
         }
         if (screenParam === 'signup' && !urlParams.get('code') && !window.location.hash.includes('type=recovery')) {
