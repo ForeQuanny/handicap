@@ -344,55 +344,24 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
     </div>
   );
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/create-checkout-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: session?.user?.email, userId: session?.user?.id }),
+        });
+        const data = await res.json();
+        if (data.url) window.location.href = data.url;
+      } catch {}
+    })();
+  }, []);
+
   return (
-    <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
+    <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',alignItems:'center',justifyContent:'center'}}>
       <style>{globalStyles}</style>
-      <AppHeader />
-      <div style={{padding:'28px 24px',flex:1,display:'flex',flexDirection:'column'}}>
-        <div style={{textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:12}}>
-          <div style={{fontSize:13,fontWeight:700,letterSpacing:2,textTransform:'uppercase',color:'#e8b84b'}}>How Would You Like to Subscribe?</div>
-          <div style={{fontSize:13,color:'#f5f0e8',lineHeight:1.7}}>Continue via the web, or subscribe on an Apple device<br />using In-App Purchase through the App Store.</div>
-          <button
-            onClick={async () => {
-              setRedirecting(true);
-              try {
-                const res = await fetch(`${API_BASE}/api/create-checkout-session`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ email: session?.user?.email, userId: session?.user?.id }),
-                });
-                const data = await res.json();
-                if (data.url) window.location.href = data.url;
-              } catch {}
-              setRedirecting(false);
-            }}
-            disabled={redirecting}
-            onMouseEnter={e=>e.currentTarget.style.boxShadow='0 0 20px rgba(232,184,75,0.5)'}
-            onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}
-            style={{width:'100%',padding:'13px 0',background:'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:3,color:'#0d1b2e',fontSize:11,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',opacity:redirecting?0.6:1,marginTop:4,transition:'box-shadow 0.2s ease'}}
-          >
-            {redirecting ? 'Redirecting...' : 'Subscribe via Web'}
-          </button>
-          <div style={{display:'flex',alignItems:'center',gap:12,width:'100%'}}>
-            <div style={{flex:1,height:1,background:'rgba(245,240,232,0.1)'}} />
-            <span style={{fontSize:11,color:'rgba(245,240,232,0.3)',letterSpacing:1}}>or</span>
-            <div style={{flex:1,height:1,background:'rgba(245,240,232,0.1)'}} />
-          </div>
-          <a
-            href="https://apps.apple.com/app/id6783389659"
-            target="_blank"
-            rel="noreferrer"
-            onMouseEnter={e=>e.currentTarget.style.background='rgba(30,30,30,1)'}
-            onMouseLeave={e=>e.currentTarget.style.background='#000'}
-            style={{display:'flex',alignItems:'center',justifyContent:'center',width:'100%',padding:'5px 0',background:'#000',borderRadius:3,cursor:'pointer',textDecoration:'none',boxSizing:'border-box'}}
-          >
-            <img src="/app-store-badge.svg" alt="Download on the App Store" style={{height:30,width:'auto'}} />
-          </a>
-        </div>
-      </div>
-      <div style={{padding:'24px 20px 44px',textAlign:'center'}}>
-        <div onClick={handleSignOut} role="button" style={{display:'inline-block',color:'rgba(201,168,76,0.45)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Log Out</div>
-      </div>
+      <div style={{color:'rgba(245,240,232,0.4)',fontSize:12,letterSpacing:2,textTransform:'uppercase'}}>Redirecting to checkout…</div>
     </div>
   );
 }
