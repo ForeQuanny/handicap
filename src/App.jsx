@@ -3057,6 +3057,35 @@ export default function GolfHandicapApp() {
       setResetToken(token);
       setAuthLoading(false);
     };
+    const handleMagicLinkUrl = async (url) => {
+      const hash = url.split('#')[1] || '';
+      const hashParams = new URLSearchParams(hash);
+      const accessToken = hashParams.get('access_token');
+      const refreshToken = hashParams.get('refresh_token');
+      if (!accessToken) return;
+      setResendVerify(false);
+      setAuthLoading(true);
+      try {
+        const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${accessToken}` }
+        });
+        const userData = await userRes.json();
+        if (!userRes.ok || !userData?.id) { setAuthLoading(false); return; }
+        let profile = null;
+        for (let i = 0; i < 3; i++) {
+          if (i > 0) await new Promise(r => setTimeout(r, 1000));
+          const pr = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userData.id}&select=*`, {
+            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/vnd.pgrst.object+json' }
+          });
+          if (pr.ok) { profile = await pr.json(); break; }
+        }
+        const session = { access_token: accessToken, refresh_token: refreshToken || null, user: userData };
+        localStorage.setItem('sb-session', JSON.stringify(session));
+        await Purchases.logIn({ appUserID: userData.id }).catch(() => {});
+        setAuthUser({ id: userData.id, name: profile?.name || '', lastName: profile?.last_name || '', email: profile?.email || userData.email, memberNumber: profile?.member_number || null, createdAt: profile?.created_at || null, subscribed: profile?.subscribed || false, subscriptionRenewsAt: profile?.subscription_renews_at || null, stripeCustomerId: profile?.stripe_customer_id || null, paymentProvider: profile?.payment_provider || null });
+      } catch {}
+      setAuthLoading(false);
+    };
     const handleUniversalVerifyCode = async (url) => {
       if (universalCodePending.current) return;
       universalCodePending.current = true;
@@ -3146,6 +3175,7 @@ export default function GolfHandicapApp() {
       if (result.url.includes('payment/reactivated')) { launchUrlResolved.current = true; handleReactivationUrl(); }
       else if (result.url.includes('verified')) { launchUrlResolved.current = true; handleVerifiedUrl(result.url); }
       else if (result.url.includes('reset?token')) { launchUrlResolved.current = true; handleResetUrl(result.url); }
+      else if (result.url.includes('access_token=')) { skipSessionRestore.current = true; launchUrlResolved.current = true; handleMagicLinkUrl(result.url); }
       else if (result.url.includes('error=')) { launchUrlResolved.current = true; skipSessionRestore.current = true; if (result.url.includes('ltype=reset')) { setLinkError(true); } else { setResendVerify(true); } setAuthLoading(false); }
       else {
         if (dispatchUniversalUrl(result.url)) { launchUrlResolved.current = true; return; }
@@ -3163,6 +3193,7 @@ export default function GolfHandicapApp() {
       if (data.url?.includes('payment/reactivated')) handleReactivationUrl();
       else if (data.url?.includes('verified')) handleVerifiedUrl(data.url);
       else if (data.url?.includes('reset?token')) handleResetUrl(data.url);
+      else if (data.url?.includes('access_token=')) { handleMagicLinkUrl(data.url); }
       else if (data.url?.includes('error=')) { if (data.url.includes('ltype=reset')) { setLinkError(true); } else { setResendVerify(true); } setAuthLoading(false); }
       else {
         if (dispatchUniversalUrl(data.url)) return;
