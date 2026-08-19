@@ -1561,9 +1561,9 @@ const [showDeleteForm, setShowDeleteForm] = useState(false);
                 <div onClick={()=>setShowIAPMessage(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300}}>
                   <div onClick={e=>e.stopPropagation()} style={{background:'#0d1b2e',border:'1px solid rgba(232,184,75,0.4)',borderRadius:6,padding:'28px 24px',maxWidth:320,width:'90%',textAlign:'center'}}>
                     <div style={{fontSize:12,letterSpacing:3,textTransform:'uppercase',color:'#e8b84b',marginBottom:16}}>Manage Membership</div>
-                    <div style={{fontSize:14,color:'rgba(245,240,232,0.7)',marginBottom:8,lineHeight:1.8}}>App Store subscriptions must be managed through your Apple device.</div>
+                    <div style={{fontSize:14,color:'#f5f0e8',marginBottom:8,lineHeight:1.8}}>App Store subscriptions must be managed through your Apple device.</div>
                     <div style={{fontSize:13,color:'rgba(245,240,232,0.5)',marginBottom:20,lineHeight:1.8}}>Settings → [Your Name] → Subscriptions</div>
-                    <button onClick={()=>setShowIAPMessage(false)} style={{width:'100%',padding:10,background:'transparent',border:'1px solid rgba(201,168,76,0.3)',borderRadius:3,color:'#e8b84b',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>Dismiss</button>
+                    <button onClick={()=>setShowIAPMessage(false)} onMouseEnter={e=>e.currentTarget.style.background='rgba(201,168,76,0.1)'} onMouseLeave={e=>e.currentTarget.style.background='transparent'} style={{width:'100%',padding:10,background:'transparent',border:'1px solid rgba(201,168,76,0.3)',borderRadius:3,color:'#e8b84b',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>Dismiss</button>
                   </div>
                 </div>
               )}
