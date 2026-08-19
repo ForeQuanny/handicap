@@ -883,7 +883,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
           body: JSON.stringify({ password }),
         });
         const data = await res.json();
-        if (!res.ok) { setLoading(false); const isSamePw = data.code === 'same_password' || String(data.message || '').toLowerCase().includes('different'); return setError(isSamePw ? 'Please choose a different password' : (data.message || 'Failed to reset password')); }
+        if (!res.ok) { setLoading(false); const errText = String(data.message || data.msg || data.error_description || '').toLowerCase(); const isSamePw = data.code === 'same_password' || data.error_code === 'same_password' || errText.includes('different') || errText.includes('same'); return setError(isSamePw ? 'Please choose a different password' : (data.message || data.msg || 'Failed to reset password')); }
         // Send confirmation email
         try {
           const userEmail = data.email || data.user_metadata?.email;
