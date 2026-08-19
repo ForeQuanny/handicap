@@ -3277,11 +3277,6 @@ export default function GolfHandicapApp() {
           const type = params.get('type');
           if (accessToken && type === 'recovery') {
             window.history.replaceState(null, '', window.location.pathname);
-            if (/iPhone|iPad|iPod/.test(navigator.userAgent) && !window.Capacitor?.isNativePlatform?.()) {
-              window.location.href = `dtmhandicap://reset?token=${encodeURIComponent(accessToken)}`;
-              setTimeout(() => { document.open(); document.write('<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#0d1b2e;min-height:100vh}</style></head><body></body></html>'); document.close(); }, 500);
-              return;
-            }
             sessionStorage.setItem('dtm-reset-token', accessToken);
             setAuthLoading(false);
             setResetToken(accessToken);
