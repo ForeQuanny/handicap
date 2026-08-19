@@ -1737,15 +1737,15 @@ if (subPanel === 'account' && showDeleteForm) return (
           <div style={{display:'flex',flexDirection:'column',gap:28}}>
             <div role="button" onClick={()=>{setShowEmailForm(true);setEmailError('');setEmailSuccess('');setEmailForm({next:'',confirm:''});}} onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:4,cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)',userSelect:'none'}}>
               <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>Edit Account Information</span>
-              <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
+              <span style={{fontSize:14,color:'#f5f0e8'}}>›</span>
             </div>
             <div role="button" onClick={()=>{setShowPwForm(true);setPwError('');setPwSuccess('');setPwForm({current:'',next:'',confirm:''});}} onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:4,cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)',userSelect:'none'}}>
               <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>Change Password</span>
-              <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
+              <span style={{fontSize:14,color:'#f5f0e8'}}>›</span>
             </div>
             <div role="button" onClick={()=>{setShowDeleteForm(true);}} onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:4,cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)',userSelect:'none'}}>
               <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>Delete Account</span>
-              <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
+              <span style={{fontSize:14,color:'#f5f0e8'}}>›</span>
             </div>
           </div>
 
@@ -1782,19 +1782,19 @@ if (subPanel === 'account' && showDeleteForm) return (
             onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'}
             onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'}>
             <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>Account Information</span>
-            <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
+            <span style={{fontSize:14,color:'#f5f0e8'}}>›</span>
           </div>
           <div onClick={()=>setSubPanel('membership')} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'15px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:4,cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)'}}
             onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'}
             onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'}>
             <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>Membership & Payment</span>
-            <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
+            <span style={{fontSize:14,color:'#f5f0e8'}}>›</span>
           </div>
           <div onClick={()=>setSubPanel('support')} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'15px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:4,cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)'}}
             onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'}
             onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'}>
             <span style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'#f5f0e8'}}>Support</span>
-            <span style={{fontSize:14,color:'rgba(245,240,232,0.3)'}}>›</span>
+            <span style={{fontSize:14,color:'#f5f0e8'}}>›</span>
           </div>
         </div>
         <div style={{padding:`4px 20px calc(${window.Capacitor?.isNativePlatform?.() ? 50 : 8}px + env(safe-area-inset-bottom))`,flexShrink:0}}>
