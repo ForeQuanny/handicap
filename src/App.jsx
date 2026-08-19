@@ -3265,12 +3265,6 @@ export default function GolfHandicapApp() {
               setVerifiedUser(pendingUser);
               return;
             }
-            // Email confirmed but not paid — on iPhone redirect to native app for IAP, else show choice screen
-            if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-              const _deepLink = `dtmhandicap://verified?token=${encodeURIComponent(accessToken)}&userId=${encodeURIComponent(userData.id)}`;
-              showVerifiedPage(_deepLink);
-              return;
-            }
             setAuthUser({ id: userData.id, name: profile.name || userData.raw_user_meta_data?.name || '', lastName: profile.last_name || userData.raw_user_meta_data?.last_name || '', email: profile.email || userData.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: false, subscriptionRenewsAt: null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null });
             setAuthLoading(false);
             return;
@@ -3320,11 +3314,6 @@ export default function GolfHandicapApp() {
                 localStorage.setItem('sb-session', JSON.stringify(session));
                 window.history.replaceState(null, '', window.location.pathname);
                 if (!profile.subscribed) {
-                  if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-                    const _deepLink = `dtmhandicap://verified?token=${encodeURIComponent(accessToken)}&userId=${encodeURIComponent(userData.id)}`;
-                    showVerifiedPage(_deepLink);
-                    return;
-                  }
                   setAuthUser({ id: userData.id, name: profile.name || userData.raw_user_meta_data?.name || '', lastName: profile.last_name || userData.raw_user_meta_data?.last_name || '', email: profile.email || userData.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: false, subscriptionRenewsAt: null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null });
                   setAuthLoading(false);
                   return;
@@ -3368,12 +3357,6 @@ export default function GolfHandicapApp() {
               });
               const profile = await res.json();
               if (res.ok && profile?.id) {
-                // iPhone + unsubscribed in web Safari → send to native app (handles retries on second verify tap)
-                if (!profile.subscribed && !window.Capacitor?.isNativePlatform?.() && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
-                  const _dl = `dtmhandicap://verified?token=${encodeURIComponent(token)}&userId=${encodeURIComponent(s.user.id)}`;
-                  showVerifiedPage(_dl);
-                  return;
-                }
                 let subscribedStatus = profile.subscribed || false;
                 if (subscribedStatus && profile.payment_provider === 'apple' && window.Capacitor?.isNativePlatform?.()) {
                   try {
