@@ -1357,6 +1357,7 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
   const [loggingOut, setLoggingOut] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [showIAPMessage, setShowIAPMessage] = useState(false);
 
   const [emailForm, setEmailForm] = useState({ next:'', confirm:'' });
   const [showEmailForm, setShowEmailForm] = useState(false);
@@ -1556,9 +1557,22 @@ const [showDeleteForm, setShowDeleteForm] = useState(false);
           <div style={{height:1,background:'rgba(201,168,76,0.08)',marginBottom:16}}/>
           {user.paymentProvider === 'apple' ? (
             <>
+              {showIAPMessage && (
+                <div onClick={()=>setShowIAPMessage(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+                  <div onClick={e=>e.stopPropagation()} style={{background:'#0d1b2e',border:'1px solid rgba(232,184,75,0.3)',borderRadius:6,padding:'28px 24px',maxWidth:340,width:'100%',textAlign:'center'}}>
+                    <p style={{color:'#f5f0e8',fontSize:14,fontWeight:600,lineHeight:1.7,margin:'0 0 8px'}}>App Store subscriptions must be managed through your Apple device.</p>
+                    <p style={{color:'rgba(245,240,232,0.6)',fontSize:13,lineHeight:1.7,margin:0}}>Settings → [Your Name] → Subscriptions</p>
+                    <button onClick={()=>setShowIAPMessage(false)} style={{marginTop:24,background:'none',border:'1px solid rgba(245,240,232,0.2)',borderRadius:3,color:'rgba(245,240,232,0.5)',fontSize:11,letterSpacing:2,textTransform:'uppercase',padding:'10px 24px',cursor:'pointer'}}>Dismiss</button>
+                  </div>
+                </div>
+              )}
               <button
                 onClick={async () => {
-                  await Browser.open({ url: 'https://apps.apple.com/account/subscriptions' });
+                  if (window.Capacitor?.isNativePlatform?.()) {
+                    await Browser.open({ url: 'https://apps.apple.com/account/subscriptions' });
+                  } else {
+                    setShowIAPMessage(true);
+                  }
                 }}
                 className="signout-btn" style={{width:'100%',padding:11,background:'linear-gradient(135deg,#c41e3a,#9e1830)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer',marginBottom:12}}
               >
