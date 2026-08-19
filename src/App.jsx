@@ -370,10 +370,9 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
   }, []);
 
   return (
-    <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',alignItems:'center',justifyContent:'center'}}>
+    <div style={{minHeight:'100dvh',background:'#0d1b2e',display:'flex',alignItems:'center',justifyContent:'center'}}>
       <style>{globalStyles}</style>
-      <style>{`@keyframes dtm-spin{to{transform:rotate(360deg)}}`}</style>
-      <div style={{width:36,height:36,border:'3px solid rgba(232,184,75,0.2)',borderTopColor:'#e8b84b',borderRadius:'50%',animation:'dtm-spin 0.8s linear infinite'}} />
+      <div style={{color:'#e8b84b',fontSize:14,fontWeight:700,letterSpacing:2,textTransform:'uppercase'}}>Redirecting to checkout...</div>
     </div>
   );
 }
