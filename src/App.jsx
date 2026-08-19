@@ -392,12 +392,12 @@ function ResendVerifyScreen() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/resend`, {
+      const res = await fetch(`${API_BASE}/api/send-auth-email`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
-        body: JSON.stringify({ type: 'signup', email })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'resend_verify', email })
       });
-      if (res.ok) { setSent(true); } else { const d = await res.json().catch(()=>({})); setError(d.message || d.msg || 'Failed to send. Please try again.'); }
+      if (res.ok) { setSent(true); } else { const d = await res.json().catch(()=>({})); setError(d.error || 'Failed to send. Please try again.'); }
     } catch { setError('Failed to send. Please try again.'); }
     setLoading(false);
   };
@@ -408,7 +408,7 @@ function ResendVerifyScreen() {
       <AppHeader />
       <div style={{padding:'4px 24px 0'}}>
         {sent ? (
-          <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0}}>Check your email for a new<br/>verification link.</p>
+          <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0}}>Please check your email.</p>
         ) : (
           <>
             <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:'0 0 20px'}}>Your verification link has expired.</p>
@@ -3369,7 +3369,7 @@ export default function GolfHandicapApp() {
             setResetToken(accessToken);
             return;
           }
-          if (accessToken && (type === 'signup' || type === 'email')) {
+          if (accessToken && (type === 'signup' || type === 'email' || type === 'magiclink')) {
             // Fetch user info and profile with this token
             const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
               headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${accessToken}` }

@@ -54,6 +54,23 @@ export default async function handler(req, res) {
       <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:36px 0 0;">Log in <a href="https://euwqnyzzrxrmldmfspjr.supabase.co/functions/v1/open-app?memberNumber=${encodeURIComponent(memberNumber)}" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a></p>
     `);
 
+  } else if (type === 'resend_verify') {
+    const linkRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}` },
+      body: JSON.stringify({ type: 'magiclink', email, options: { redirect_to: 'https://app.dtmhandicap.com/login' } }),
+    });
+    const linkData = await linkRes.json();
+    const url = linkData.action_link || linkData.data?.action_link;
+    if (!url) return res.status(200).json({ success: true }); // don't reveal if email not found
+    subject = 'Verify Your Email';
+    html = wrapHtml(`
+      <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0 0 24px;text-align:center;">Click the link below to continue your sign up:</p>
+      <div style="text-align:center;margin:0 0 8px;">
+        <a href="${url}" style="background:#e8b84b;color:#0d1b2e;font-size:12px;font-weight:900;letter-spacing:3px;text-transform:uppercase;padding:14px 32px;border-radius:4px;text-decoration:none;display:inline-block;font-family:Verdana,Geneva,sans-serif;">VERIFY EMAIL</a>
+      </div>
+    `);
+
   } else if (type === 'password_reset') {
     const linkRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
       method: 'POST',
