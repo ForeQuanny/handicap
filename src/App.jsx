@@ -302,6 +302,21 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
     </div>
   );
 
+  // ── Web: lapsed Apple IAP user — cannot reactivate via browser ──────────────
+  if (!isNative && isLapsed && user?.paymentProvider === 'apple') return (
+    <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
+      <style>{globalStyles}</style>
+      <AppHeader />
+      <div style={{padding:'4px 24px',flex:1,display:'flex',flexDirection:'column',gap:16}}>
+        <div style={{fontSize:14,color:'#e8b84b',letterSpacing:0.3,textAlign:'center',marginBottom:4}}>Your membership has lapsed and is currently inactive.</div>
+        <div style={{fontSize:14,color:'#f5f0e8',lineHeight:1.75,textAlign:'center'}}>To reactivate your membership, please visit the App Store on your Apple device.</div>
+      </div>
+      <div style={{padding:'24px 20px 44px',textAlign:'center'}}>
+        <div onClick={handleSignOut} role="button" style={{display:'inline-block',color:'rgba(201,168,76,0.45)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Log Out</div>
+      </div>
+    </div>
+  );
+
   // ── Web: lapsed user waits while Stripe portal opens ────────────────────────
   if (isLapsed) return (
     <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
