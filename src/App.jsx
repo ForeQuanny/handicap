@@ -126,10 +126,6 @@ function calcHandicapAllTime(rounds) {
   return val === null ? null : Math.trunc(val);
 }
 
-function showVerifiedPage(deepLink) {
-  const html = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#0d1b2e;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:Verdana,Geneva,sans-serif;}.wrap{text-align:center;padding:40px 24px;max-width:360px;}h1{color:#f5f0e8;font-size:20px;font-weight:900;letter-spacing:3.75px;text-transform:uppercase;margin:0 0 6px;}.sub{color:#e02247;font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;margin:0;}.line{height:2px;background:rgba(201,168,76,0.45);margin:16px 0 28px;}.msg{color:rgba(245,240,232,0.75);font-size:14px;line-height:1.75;margin:0 0 28px;font-family:system-ui,sans-serif;letter-spacing:0.2px;}a.btn{display:block;background:linear-gradient(135deg,#e8b84b,#c49a30);color:#0d1b2e;font-size:12px;font-weight:900;letter-spacing:3px;text-transform:uppercase;padding:16px 24px;border-radius:4px;text-decoration:none;}</style></head><body><div class="wrap"><h1>Down The Middle</h1><p class="sub">A Truer Golf Handicap</p><div class="line"></div><p class="msg">Email verified! Tap the button below to open the app and complete your membership.</p><a class="btn" href="${deepLink}">Open DTM App</a></div></body></html>`;
-  document.open(); document.write(html); document.close();
-}
 
 function AppHeader() {
   return (
