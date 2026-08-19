@@ -380,6 +380,51 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
 
 
 
+function ResendVerifyScreen() {
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
+  const inputStyle = { background:'rgba(8,18,36,0.8)', border:'1px solid rgba(201,168,76,0.25)', borderRadius:3, padding:'9px 10px', color:'#f5f0e8', fontSize:13, outline:'none', width:'100%', WebkitTextFillColor:'#f5f0e8' };
+
+  const handleResend = async () => {
+    if (!email || loading) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/resend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+        body: JSON.stringify({ type: 'signup', email })
+      });
+      if (res.ok) { setSent(true); } else { const d = await res.json().catch(()=>({})); setError(d.message || d.msg || 'Failed to send. Please try again.'); }
+    } catch { setError('Failed to send. Please try again.'); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
+      <style>{globalStyles}</style>
+      <AppHeader />
+      <div style={{padding:'4px 24px 0'}}>
+        {sent ? (
+          <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0}}>Check your email for a new<br/>verification link.</p>
+        ) : (
+          <>
+            <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:'0 0 20px'}}>Your verification link has expired.</p>
+            <p style={{color:'#f5f0e8',fontSize:14,lineHeight:1.75,textAlign:'center',margin:'0 0 20px'}}>Enter your email to receive a new one.</p>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email address" style={inputStyle} />
+            {error && <div style={{fontSize:11,color:'#e02247',marginTop:8,textAlign:'center'}}>{error}</div>}
+            <button onClick={handleResend} disabled={!email||loading} style={{marginTop:12,width:'100%',padding:'13px 0',background:email&&!loading?'linear-gradient(135deg,#e8b84b,#c49a30)':'rgba(232,184,75,0.3)',border:'none',borderRadius:3,color:'#0d1b2e',fontSize:11,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:email&&!loading?'pointer':'default'}}>
+              {loading ? 'Sending...' : 'Send New Link'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function generateMemberNumber() {
   const a = String(Math.floor(1000 + Math.random() * 9000));
   const b = String(Math.floor(1000 + Math.random() * 9000));
@@ -2966,6 +3011,7 @@ export default function GolfHandicapApp() {
   const [resetToken, setResetToken] = useState(() => window.Capacitor?.isNativePlatform?.() ? null : (sessionStorage.getItem('dtm-reset-token') || null));
   const [exchangeError, setExchangeError] = useState(null);
   const [linkError, setLinkError] = useState(false);
+  const [resendVerify, setResendVerify] = useState(false);
   const universalCodePending = useRef(false);
 
   useEffect(() => {
@@ -3101,7 +3147,7 @@ export default function GolfHandicapApp() {
       if (result.url.includes('payment/reactivated')) { launchUrlResolved.current = true; handleReactivationUrl(); }
       else if (result.url.includes('verified')) { launchUrlResolved.current = true; handleVerifiedUrl(result.url); }
       else if (result.url.includes('reset?token')) { launchUrlResolved.current = true; handleResetUrl(result.url); }
-      else if (result.url.includes('error=')) { launchUrlResolved.current = true; if (result.url.includes('ltype=reset')) { skipSessionRestore.current = true; setLinkError(true); } else { setForceLogin(true); } setAuthLoading(false); }
+      else if (result.url.includes('error=')) { launchUrlResolved.current = true; skipSessionRestore.current = true; if (result.url.includes('ltype=reset')) { setLinkError(true); } else { setResendVerify(true); } setAuthLoading(false); }
       else {
         if (dispatchUniversalUrl(result.url)) { launchUrlResolved.current = true; return; }
         const params = new URLSearchParams(result.url.split('?')[1] || '');
@@ -3118,7 +3164,7 @@ export default function GolfHandicapApp() {
       if (data.url?.includes('payment/reactivated')) handleReactivationUrl();
       else if (data.url?.includes('verified')) handleVerifiedUrl(data.url);
       else if (data.url?.includes('reset?token')) handleResetUrl(data.url);
-      else if (data.url?.includes('error=')) { if (data.url.includes('ltype=reset')) { setLinkError(true); } else { setForceLogin(true); } setAuthLoading(false); }
+      else if (data.url?.includes('error=')) { if (data.url.includes('ltype=reset')) { setLinkError(true); } else { setResendVerify(true); } setAuthLoading(false); }
       else {
         if (dispatchUniversalUrl(data.url)) return;
         const params = new URLSearchParams(data.url?.split('?')[1] || '');
@@ -3145,9 +3191,7 @@ export default function GolfHandicapApp() {
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
         if (urlParams.get('error') || hashParams.get('error')) {
           window.history.replaceState(null, '', '/');
-          if (urlParams.get('ltype') === 'reset') {
-            setLinkError(true);
-          }
+          if (urlParams.get('ltype') === 'reset') { setLinkError(true); } else { setResendVerify(true); }
           setAuthLoading(false);
           return;
         }
@@ -3460,6 +3504,7 @@ export default function GolfHandicapApp() {
       <button onClick={()=>setExchangeError(null)} style={{background:'none',border:'1px solid rgba(245,240,232,0.2)',borderRadius:4,color:'rgba(245,240,232,0.5)',fontSize:12,letterSpacing:2,textTransform:'uppercase',padding:'12px 24px',cursor:'pointer'}}>Dismiss</button>
     </div>
   );
+  if (resendVerify) return <ResendVerifyScreen />;
   if (linkError) return (
     <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
       <style>{globalStyles}</style>
