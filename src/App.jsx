@@ -3440,24 +3440,13 @@ export default function GolfHandicapApp() {
             <span style={{color:'#e8b84b',fontWeight:700}}>Note:</span> As a first time user, you're encouraged to post as many of your prior rounds as you'd like, up to 18 months back. Doing so will provide our model with as much data as possible — enabling us to deliver you an accurate handicap as soon as possible.
           </p>
           <button className="auth-btn-primary" style={{width:'100%',padding:16,background:'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:3,color:'#0d1b2e',fontSize:13,fontWeight:900,letterSpacing:4,textTransform:'uppercase',cursor:'pointer',marginTop:13}} onClick={()=>{
-            const isNative = window.Capacitor?.isNativePlatform?.();
-            const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
-            if (isIOS && !isNative) {
-              window.location.href = `dtmhandicap://app?memberNumber=${welcomeUser.memberNumber}`;
-            } else {
-              setPreFillMemberNumber(welcomeUser.memberNumber);
-              setWelcomeUser(null);
-              setAuthUser(null);
-              setForceLogin(true);
-            }
+            setPreFillMemberNumber(welcomeUser.memberNumber);
+            setWelcomeUser(null);
+            setAuthUser(null);
+            setForceLogin(true);
           }}>
             Get Started
           </button>
-          {/iPhone|iPad|iPod/.test(navigator.userAgent) && !window.Capacitor?.isNativePlatform?.() && (
-            <div style={{textAlign:'center',marginTop:13}}>
-              <span onClick={()=>{ setPreFillMemberNumber(welcomeUser.memberNumber); setWelcomeUser(null); setForceLogin(true); }} style={{fontSize:12,color:'rgba(245,240,232,0.35)',cursor:'pointer',textDecoration:'underline',letterSpacing:0.5}}>Continue in browser instead</span>
-            </div>
-          )}
         </div>
       </div>
     </div>
