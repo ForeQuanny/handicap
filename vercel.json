@@ -1,6 +1,7 @@
 {
   "rewrites": [
-    { "source": "/login", "destination": "/index.html" }
+    { "source": "/login", "destination": "/index.html" },
+    { "source": "/reset-link", "destination": "/index.html" }
   ],
   "headers": [
     {

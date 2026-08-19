@@ -3176,7 +3176,7 @@ export default function GolfHandicapApp() {
       else if (result.url.includes('verified')) { launchUrlResolved.current = true; handleVerifiedUrl(result.url); }
       else if (result.url.includes('reset?token')) { launchUrlResolved.current = true; handleResetUrl(result.url); }
       else if (result.url.includes('access_token=')) { skipSessionRestore.current = true; launchUrlResolved.current = true; handleMagicLinkUrl(result.url); }
-      else if (result.url.includes('error=')) { launchUrlResolved.current = true; skipSessionRestore.current = true; if (result.url.includes('ltype=reset')) { setLinkError(true); } else { setResendVerify(true); } setAuthLoading(false); }
+      else if (result.url.includes('error=')) { launchUrlResolved.current = true; skipSessionRestore.current = true; if (result.url.includes('/reset-link') || result.url.includes('ltype=reset')) { setLinkError(true); } else { setResendVerify(true); } setAuthLoading(false); }
       else {
         if (dispatchUniversalUrl(result.url)) { launchUrlResolved.current = true; return; }
         const params = new URLSearchParams(result.url.split('?')[1] || '');
@@ -3194,7 +3194,7 @@ export default function GolfHandicapApp() {
       else if (data.url?.includes('verified')) handleVerifiedUrl(data.url);
       else if (data.url?.includes('reset?token')) handleResetUrl(data.url);
       else if (data.url?.includes('access_token=')) { handleMagicLinkUrl(data.url); }
-      else if (data.url?.includes('error=')) { if (data.url.includes('ltype=reset')) { setLinkError(true); } else { setResendVerify(true); } setAuthLoading(false); }
+      else if (data.url?.includes('error=')) { if (data.url.includes('/reset-link') || data.url.includes('ltype=reset')) { setLinkError(true); } else { setResendVerify(true); } setAuthLoading(false); }
       else {
         if (dispatchUniversalUrl(data.url)) return;
         const params = new URLSearchParams(data.url?.split('?')[1] || '');
@@ -3220,8 +3220,10 @@ export default function GolfHandicapApp() {
         const urlParams = new URLSearchParams(window.location.search);
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
         if (urlParams.get('error') || hashParams.get('error')) {
+          const currentPath = window.location.pathname;
           window.history.replaceState(null, '', '/');
-          if (urlParams.get('ltype') === 'reset') { setLinkError(true); } else { setResendVerify(true); }
+          const isReset = currentPath === '/reset-link' || urlParams.get('ltype') === 'reset';
+          if (isReset) { setLinkError(true); } else { setResendVerify(true); }
           setAuthLoading(false);
           return;
         }
