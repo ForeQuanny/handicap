@@ -322,7 +322,7 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
     <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
       <style>{globalStyles}</style>
       <AppHeader />
-      <div style={{padding:'28px 24px',flex:1,display:'flex',flexDirection:'column'}}>
+      <div style={{padding:'4px 24px 28px',flex:1,display:'flex',flexDirection:'column'}}>
         <div style={{textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:12}}>
           <div style={{fontSize:13,fontWeight:700,letterSpacing:2,textTransform:'uppercase',color:'#e8b84b'}}>Welcome Back, {user.name}</div>
           <div style={{fontSize:13,color:'#f5f0e8',lineHeight:1.7}}>Your membership is currently inactive.</div>
