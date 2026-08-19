@@ -2918,6 +2918,7 @@ export default function GolfHandicapApp() {
   const [authLoading, setAuthLoading] = useState(true);
   const [welcomeUser, setWelcomeUser] = useState(null);
   const skipSessionRestore = useRef(false);
+  const launchUrlResolved = useRef(!window.Capacitor?.isNativePlatform?.());
 
   const restHeaders = () => {
     try {
@@ -3068,20 +3069,21 @@ export default function GolfHandicapApp() {
       return false;
     };
     CapApp.getLaunchUrl().then(result => {
-      if (!result?.url) return;
-      if (result.url.includes('payment/reactivated')) handleReactivationUrl();
-      else if (result.url.includes('verified')) handleVerifiedUrl(result.url);
-      else if (result.url.includes('reset?token')) handleResetUrl(result.url);
+      if (!result?.url) { launchUrlResolved.current = true; return; }
+      if (result.url.includes('payment/reactivated')) { launchUrlResolved.current = true; handleReactivationUrl(); }
+      else if (result.url.includes('verified')) { launchUrlResolved.current = true; handleVerifiedUrl(result.url); }
+      else if (result.url.includes('reset?token')) { launchUrlResolved.current = true; handleResetUrl(result.url); }
       else {
-        if (dispatchUniversalUrl(result.url)) return;
+        if (dispatchUniversalUrl(result.url)) { launchUrlResolved.current = true; return; }
         const params = new URLSearchParams(result.url.split('?')[1] || '');
         const mn = params.get('memberNumber');
         if (mn) { setPreFillMemberNumber(mn); setPreFillNonce(n => n + 1); skipSessionRestore.current = true; }
         skipSessionRestore.current = true;
+        launchUrlResolved.current = true;
         if (params.get('screen') === 'signup') { setForceSignup(true); } else { setForceLogin(true); }
         setAuthLoading(false);
       }
-    }).catch(() => {});
+    }).catch(() => { launchUrlResolved.current = true; });
     CapApp.addListener('appUrlOpen', async (data) => {
       try { await Browser.close(); } catch {}
       if (data.url?.includes('payment/reactivated')) handleReactivationUrl();
@@ -3100,7 +3102,12 @@ export default function GolfHandicapApp() {
 
   useEffect(() => {
     const restoreSession = async () => {
-      if (window.Capacitor?.isNativePlatform?.()) await new Promise(r => setTimeout(r, 150));
+      if (window.Capacitor?.isNativePlatform?.()) {
+        const start = Date.now();
+        while (!launchUrlResolved.current && Date.now() - start < 2000) {
+          await new Promise(r => setTimeout(r, 20));
+        }
+      }
       if (skipSessionRestore.current) { return; }
       try {
         // Check for PKCE code flow (new Supabase default)
