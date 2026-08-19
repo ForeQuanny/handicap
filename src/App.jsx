@@ -411,11 +411,11 @@ function ResendVerifyScreen() {
           <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0}}>Please check your email.</p>
         ) : (
           <>
-            <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:'0 0 20px'}}>Your verification link has expired.</p>
-            <p style={{color:'#f5f0e8',fontSize:14,lineHeight:1.75,textAlign:'center',margin:'0 0 20px'}}>Enter your email to receive a new one.</p>
+            <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:'0 0 4px'}}>Your verification link has expired.</p>
+            <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:'0 0 20px'}}>Enter your email to receive a new one.</p>
             <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email address" style={inputStyle} />
             {error && <div style={{fontSize:11,color:'#e02247',marginTop:8,textAlign:'center'}}>{error}</div>}
-            <button onClick={handleResend} disabled={!email||loading} style={{marginTop:12,width:'100%',padding:'13px 0',background:email&&!loading?'linear-gradient(135deg,#e8b84b,#c49a30)':'rgba(232,184,75,0.3)',border:'none',borderRadius:3,color:'#0d1b2e',fontSize:11,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:email&&!loading?'pointer':'default'}}>
+            <button onClick={handleResend} disabled={!email||loading} style={{marginTop:12,width:'100%',padding:'13px 0',background:email&&!loading?'linear-gradient(135deg,#c41e3a,#9e1830)':'rgba(196,30,58,0.3)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:email&&!loading?'pointer':'default'}}>
               {loading ? 'Sending...' : 'Send New Link'}
             </button>
           </>
