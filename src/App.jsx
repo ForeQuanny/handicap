@@ -2935,6 +2935,7 @@ export default function GolfHandicapApp() {
   const [reactivationReturn, setReactivationReturn] = useState(false);
   const [resetToken, setResetToken] = useState(() => window.Capacitor?.isNativePlatform?.() ? null : (sessionStorage.getItem('dtm-reset-token') || null));
   const [exchangeError, setExchangeError] = useState(null);
+  const [linkError, setLinkError] = useState(false);
   const universalCodePending = useRef(false);
 
   useEffect(() => {
@@ -3109,6 +3110,12 @@ export default function GolfHandicapApp() {
       try {
         // Check for PKCE code flow (new Supabase default)
         const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('error')) {
+          window.history.replaceState(null, '', '/');
+          setLinkError(true);
+          setAuthLoading(false);
+          return;
+        }
         const screenParam = urlParams.get('screen');
         if ((screenParam === 'login' || window.location.pathname === '/login') && !urlParams.get('code') && !window.location.hash.includes('type=recovery')) {
           const mn = urlParams.get('memberNumber');
@@ -3416,6 +3423,15 @@ export default function GolfHandicapApp() {
       <div style={{color:'#e02247',fontSize:12,fontWeight:700,letterSpacing:2,textTransform:'uppercase',marginBottom:12}}>Verification Error</div>
       <div style={{color:'rgba(245,240,232,0.75)',fontSize:13,lineHeight:1.6,textAlign:'center',marginBottom:24,wordBreak:'break-all'}}>{exchangeError}</div>
       <button onClick={()=>setExchangeError(null)} style={{background:'none',border:'1px solid rgba(245,240,232,0.2)',borderRadius:4,color:'rgba(245,240,232,0.5)',fontSize:12,letterSpacing:2,textTransform:'uppercase',padding:'12px 24px',cursor:'pointer'}}>Dismiss</button>
+    </div>
+  );
+  if (linkError) return (
+    <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
+      <style>{globalStyles}</style>
+      <AppHeader />
+      <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',padding:'24px'}}>
+        <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0}}>This reset link has already been used. Please request a new one.</p>
+      </div>
     </div>
   );
 
