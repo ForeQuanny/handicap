@@ -98,7 +98,7 @@ export default async function handler(req, res) {
     html = wrapHtml(`
       <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0 0 4px;text-align:center;word-break:break-word;">${requesterName} has requested</p>
       <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0;text-align:center;word-break:break-word;">to add you as a Playing Partner.</p>
-      <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:28px 0 0;">Log in and accept <a href="https://euwqnyzzrxrmldmfspjr.supabase.co/functions/v1/open-app" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a></p>
+      <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:28px 0 0;">Log in and accept <a href="https://euwqnyzzrxrmldmfspjr.supabase.co/functions/v1/open-app?screen=login" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a></p>
     `);
 
   } else if (type === 'account_deleted') {
