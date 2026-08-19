@@ -1575,7 +1575,7 @@ const [showDeleteForm, setShowDeleteForm] = useState(false);
                     const res = await fetch(`${API_BASE}/api/create-portal-session`, {
                       method: 'POST',
                       headers: { ...(await authHeadersAsync()), 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ customerId: user.stripeCustomerId }),
+                      body: JSON.stringify({ customerId: user.stripeCustomerId, returnUrl: 'https://app.dtmhandicap.com' }),
                     });
                     const data = await res.json();
                     if (data.url) {
