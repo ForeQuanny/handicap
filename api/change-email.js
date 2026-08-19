@@ -76,7 +76,7 @@ export default async function handler(req, res) {
       await fetch(`https://app.dtmhandicap.com/api/send-auth-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'email_changed', email: oldEmail })
+        body: JSON.stringify({ type: 'email_changed', email: newEmail })
       });
     } catch {}
 
