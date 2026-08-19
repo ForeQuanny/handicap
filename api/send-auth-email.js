@@ -67,7 +67,7 @@ export default async function handler(req, res) {
     html = wrapHtml(`
       <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0 0 24px;text-align:center;">Click the link below to continue your sign up:</p>
       <div style="text-align:center;margin:0 0 8px;">
-        <a href="${url}" style="background:#e8b84b;color:#0d1b2e;font-size:12px;font-weight:900;letter-spacing:3px;text-transform:uppercase;padding:14px 32px;border-radius:4px;text-decoration:none;display:inline-block;font-family:Verdana,Geneva,sans-serif;">VERIFY EMAIL</a>
+        <a href="${url}" style="background:#e8b84b;color:#0d1b2e;font-size:12px;font-weight:900;letter-spacing:3px;text-transform:uppercase;padding:14px 32px;border-radius:4px;text-decoration:none;display:inline-block;font-family:Verdana,Geneva,sans-serif;">CONTINUE</a>
       </div>
     `);
 
