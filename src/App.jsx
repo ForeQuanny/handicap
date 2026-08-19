@@ -3071,6 +3071,7 @@ export default function GolfHandicapApp() {
       if (result.url.includes('payment/reactivated')) { launchUrlResolved.current = true; handleReactivationUrl(); }
       else if (result.url.includes('verified')) { launchUrlResolved.current = true; handleVerifiedUrl(result.url); }
       else if (result.url.includes('reset?token')) { launchUrlResolved.current = true; handleResetUrl(result.url); }
+      else if (result.url.includes('error=')) { launchUrlResolved.current = true; setLinkError(true); setAuthLoading(false); }
       else {
         if (dispatchUniversalUrl(result.url)) { launchUrlResolved.current = true; return; }
         const params = new URLSearchParams(result.url.split('?')[1] || '');
@@ -3087,6 +3088,7 @@ export default function GolfHandicapApp() {
       if (data.url?.includes('payment/reactivated')) handleReactivationUrl();
       else if (data.url?.includes('verified')) handleVerifiedUrl(data.url);
       else if (data.url?.includes('reset?token')) handleResetUrl(data.url);
+      else if (data.url?.includes('error=')) { setLinkError(true); setAuthLoading(false); }
       else {
         if (dispatchUniversalUrl(data.url)) return;
         const params = new URLSearchParams(data.url?.split('?')[1] || '');
@@ -3110,7 +3112,8 @@ export default function GolfHandicapApp() {
       try {
         // Check for PKCE code flow (new Supabase default)
         const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('error')) {
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        if (urlParams.get('error') || hashParams.get('error')) {
           window.history.replaceState(null, '', '/');
           setLinkError(true);
           setAuthLoading(false);
