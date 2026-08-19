@@ -3432,8 +3432,8 @@ export default function GolfHandicapApp() {
     <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
       <style>{globalStyles}</style>
       <AppHeader />
-      <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'flex-start',padding:'24px 24px 0'}}>
-        <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0,width:'100%'}}>This reset link has already been used.<br/>Please request a new one.</p>
+      <div style={{padding:'4px 24px 0',textAlign:'center'}}>
+        <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0}}>This reset link has already been used.<br/>Please request a new one.</p>
       </div>
     </div>
   );
