@@ -1558,11 +1558,12 @@ const [showDeleteForm, setShowDeleteForm] = useState(false);
           {user.paymentProvider === 'apple' ? (
             <>
               {showIAPMessage && (
-                <div onClick={()=>setShowIAPMessage(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
-                  <div onClick={e=>e.stopPropagation()} style={{background:'#0d1b2e',border:'1px solid rgba(232,184,75,0.3)',borderRadius:6,padding:'28px 24px',maxWidth:340,width:'100%',textAlign:'center'}}>
-                    <p style={{color:'#f5f0e8',fontSize:14,fontWeight:600,lineHeight:1.7,margin:'0 0 8px'}}>App Store subscriptions must be managed through your Apple device.</p>
-                    <p style={{color:'rgba(245,240,232,0.6)',fontSize:13,lineHeight:1.7,margin:0}}>Settings → [Your Name] → Subscriptions</p>
-                    <button onClick={()=>setShowIAPMessage(false)} style={{marginTop:24,background:'none',border:'1px solid rgba(245,240,232,0.2)',borderRadius:3,color:'rgba(245,240,232,0.5)',fontSize:11,letterSpacing:2,textTransform:'uppercase',padding:'10px 24px',cursor:'pointer'}}>Dismiss</button>
+                <div onClick={()=>setShowIAPMessage(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300}}>
+                  <div onClick={e=>e.stopPropagation()} style={{background:'#0d1b2e',border:'1px solid rgba(232,184,75,0.4)',borderRadius:6,padding:'28px 24px',maxWidth:320,width:'90%',textAlign:'center'}}>
+                    <div style={{fontSize:12,letterSpacing:3,textTransform:'uppercase',color:'#e8b84b',marginBottom:16}}>Manage Membership</div>
+                    <div style={{fontSize:14,color:'rgba(245,240,232,0.7)',marginBottom:8,lineHeight:1.8}}>App Store subscriptions must be managed through your Apple device.</div>
+                    <div style={{fontSize:13,color:'rgba(245,240,232,0.5)',marginBottom:20,lineHeight:1.8}}>Settings → [Your Name] → Subscriptions</div>
+                    <button onClick={()=>setShowIAPMessage(false)} style={{width:'100%',padding:10,background:'transparent',border:'1px solid rgba(201,168,76,0.3)',borderRadius:3,color:'#e8b84b',fontSize:11,fontWeight:700,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>Dismiss</button>
                   </div>
                 </div>
               )}
