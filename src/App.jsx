@@ -1440,7 +1440,7 @@ const [showDeleteForm, setShowDeleteForm] = useState(false);
       headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${access_token}` },
       body: JSON.stringify({ password: pwForm.next }),
     });
-    if (!updateRes.ok) { setPwLoading(false); return setPwError('Failed to update password. Please try again.'); }
+    if (!updateRes.ok) { const d = await updateRes.json().catch(()=>({})); const errText = String(d.message||d.msg||d.error_description||'').toLowerCase(); const isSame = d.code==='same_password'||d.error_code==='same_password'||errText.includes('different')||errText.includes('same'); setPwLoading(false); return setPwError(isSame ? 'Please choose a different password' : 'Failed to update password. Please try again.'); }
     // Save the refreshed session so the old token doesn't expire the user out
     try {
       const existing = JSON.parse(localStorage.getItem('sb-session') || '{}');
