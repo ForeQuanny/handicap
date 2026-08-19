@@ -273,7 +273,7 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
       <style>{globalStyles}</style>
       <AppHeader />
       <div style={{padding:'4px 24px',flex:1,display:'flex',flexDirection:'column',gap:20}}>
-        {isLapsed && <div style={{fontSize:14,color:'#e8b84b',letterSpacing:0.3,textAlign:'center',marginBottom:8,whiteSpace:'nowrap'}}>Your membership has lapsed and is currently inactive!</div>}
+        {isLapsed && <div style={{fontSize:14,color:'#e8b84b',letterSpacing:0.3,textAlign:'center',marginBottom:8,whiteSpace:'nowrap'}}>Your membership has lapsed and is currently inactive.</div>}
         <div style={{display:'flex',flexDirection:'column',gap:18,paddingLeft:40}}>
           {['Annual Membership','Handicap tracking','Unlimited rounds','Scoring analytics','Social','$49.99/year · Auto-renewing'].map(f => (
             <div key={f} style={{display:'flex',alignItems:'center',gap:14,fontSize:16,color:'#f5f0e8'}}>
@@ -309,7 +309,7 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
       <AppHeader />
       <div style={{padding:'4px 24px',flex:1,display:'flex',flexDirection:'column',gap:16}}>
         <div style={{fontSize:14,color:'#e8b84b',letterSpacing:0.3,textAlign:'center',marginBottom:4}}>Your membership has lapsed and is currently inactive.</div>
-        <div style={{fontSize:14,color:'#f5f0e8',lineHeight:1.75,textAlign:'center'}}>To reactivate your membership, please visit the App Store on your Apple device.</div>
+        <div style={{fontSize:14,color:'#f5f0e8',lineHeight:1.75,textAlign:'center'}}>To reactivate your membership, please visit<br/>the App Store on your Apple device.</div>
       </div>
       <div style={{padding:'24px 20px 44px',textAlign:'center'}}>
         <div onClick={handleSignOut} role="button" style={{display:'inline-block',color:'rgba(201,168,76,0.45)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Log Out</div>
