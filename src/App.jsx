@@ -3071,7 +3071,7 @@ export default function GolfHandicapApp() {
       if (result.url.includes('payment/reactivated')) { launchUrlResolved.current = true; handleReactivationUrl(); }
       else if (result.url.includes('verified')) { launchUrlResolved.current = true; handleVerifiedUrl(result.url); }
       else if (result.url.includes('reset?token')) { launchUrlResolved.current = true; handleResetUrl(result.url); }
-      else if (result.url.includes('error=')) { launchUrlResolved.current = true; setLinkError(true); setAuthLoading(false); }
+      else if (result.url.includes('error=')) { skipSessionRestore.current = true; launchUrlResolved.current = true; setLinkError(true); setAuthLoading(false); }
       else {
         if (dispatchUniversalUrl(result.url)) { launchUrlResolved.current = true; return; }
         const params = new URLSearchParams(result.url.split('?')[1] || '');
@@ -3432,8 +3432,8 @@ export default function GolfHandicapApp() {
     <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
       <style>{globalStyles}</style>
       <AppHeader />
-      <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',padding:'24px'}}>
-        <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0}}>This reset link has already been used. Please request a new one.</p>
+      <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'flex-start',padding:'24px 24px 0'}}>
+        <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0,width:'100%'}}>This reset link has already been used.<br/>Please request a new one.</p>
       </div>
     </div>
   );
