@@ -63,7 +63,7 @@ export default async function handler(req, res) {
     const linkData = await linkRes.json();
     const url = linkData.action_link || linkData.data?.action_link;
     if (!url) return res.status(200).json({ success: true }); // don't reveal if email not found
-    subject = 'Verify Your Email';
+    subject = 'Continue Verification';
     html = wrapHtml(`
       <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0 0 24px;text-align:center;">Click the link below to continue your sign up:</p>
       <div style="text-align:center;margin:0 0 8px;">
