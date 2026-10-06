@@ -9,7 +9,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   try {
-    const { email, userId } = req.body;
+    const { email, userId, reactivation } = req.body;
+    const successUrl = reactivation
+      ? 'https://app.dtmhandicap.com/?payment=reactivated'
+      : `${req.headers.origin}?payment=success`;
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'subscription',
@@ -19,8 +22,8 @@ export default async function handler(req, res) {
           price_data: {
             currency: 'usd',
             product_data: {
-              name: 'Down The Middle',
-              description: 'Annual membership — unlimited rounds, playing partners & handicap tracking',
+              name: 'Down The Middle — Annual Membership',
+              description: 'Annual Membership — Handicap tracking, unlimited rounds, scoring analytics and social',
             },
             unit_amount: 4999,
             recurring: {
@@ -33,7 +36,7 @@ export default async function handler(req, res) {
       metadata: {
         userId,
       },
-      success_url: `${req.headers.origin}?payment=success`,
+      success_url: successUrl,
       cancel_url: `${req.headers.origin}?payment=cancelled`,
     });
     res.status(200).json({ url: session.url });

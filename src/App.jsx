@@ -2,13 +2,30 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import { Browser } from "@capacitor/browser";
 import { App as CapApp } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
+import { Preferences } from "@capacitor/preferences";
 import { Purchases } from '@revenuecat/purchases-capacitor';
+import { PushNotifications } from '@capacitor/push-notifications';
 
 const SUPABASE_URL = "https://euwqnyzzrxrmldmfspjr.supabase.co";
 const API_BASE = "https://app.dtmhandicap.com";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1d3FueXp6cnhybWxkbWZzcGpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1MzAwODMsImV4cCI6MjA5MDEwNjA4M30.4PWVQFOIx3yX7oMWvpO06_dqdrGLk0PGE77DstmpJO0";
 const RC_API_KEY = 'appl_CuzGSslMbEObJWALvLlNjJxPEnc';
 const IAP_PRODUCT_ID = 'com.dtmhandicap.membership.annual';
+const _RESET_WINDOW = 300000;
+const checkResetMarker = async () => {
+  try { const ls = localStorage.getItem('dtm-reset-pending'); if (ls && (Date.now() - parseInt(ls)) < _RESET_WINDOW) return true; } catch(e) {}
+  const { value } = await Preferences.get({ key: 'dtm-pw-reset-at' });
+  return !!(value && (Date.now() - parseInt(value)) < _RESET_WINDOW);
+};
+const clearResetMarkers = () => {
+  try { localStorage.removeItem('dtm-reset-pending'); } catch(e) {}
+  Preferences.remove({ key: 'dtm-pw-reset-at' }).catch(() => {});
+};
+const setResetMarkers = () => {
+  try { localStorage.setItem('dtm-reset-pending', String(Date.now())); } catch(e) {}
+  Preferences.set({ key: 'dtm-pw-reset-at', value: String(Date.now()) }).catch(() => {});
+};
 
 
 
@@ -141,7 +158,6 @@ function AppHeader() {
 function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativePurchaseSuccess }) {
   const [reactivating, setReactivating] = useState(false);
   const [iapError, setIapError] = useState('');
-  const [redirecting, setRedirecting] = useState(false);
   const isNative = window.Capacitor?.isNativePlatform?.();
   const isLapsed = user && user.memberNumber && (user.stripeCustomerId || user.paymentProvider === 'apple');
 
@@ -194,11 +210,12 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
   // ── Native: on mount, silently sync if already subscribed in RevenueCat ────────
   useEffect(() => {
     if (!isNative) return;
+    let mounted = true;
     (async () => {
       try {
         const { customerInfo } = await Purchases.getCustomerInfo();
         const hasActiveSub = (customerInfo.activeSubscriptions?.length ?? 0) > 0;
-        if (!hasActiveSub) return;
+        if (!hasActiveSub || !mounted) return;
         const renewsAt = customerInfo.latestExpirationDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
         const savedSession = JSON.parse(localStorage.getItem('sb-session') || 'null');
         let syncedUser = { ...user, subscribed: true, paymentProvider: 'apple', subscriptionRenewsAt: renewsAt };
@@ -209,6 +226,7 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
             body: JSON.stringify({ subscribed: true, payment_provider: 'apple', subscription_renews_at: renewsAt }),
           });
           try {
+            if (!mounted) return;
             const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}&select=*`, {
               headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${savedSession.access_token}`, 'Accept': 'application/vnd.pgrst.object+json' }
             });
@@ -218,9 +236,10 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
             }
           } catch {}
         }
-        onReactivated?.(syncedUser);
+        if (mounted) onReactivated?.(syncedUser);
       } catch {}
     })();
+    return () => { mounted = false; };
   }, []);
 
   // ── Web: poll Supabase on return from Stripe ─────────────────────────────────
@@ -330,7 +349,7 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
           <button onClick={async () => {
             setReactivating(true);
             try {
-              const res = await fetch(`${API_BASE}/api/create-checkout-session-2`, {
+              const res = await fetch(`${API_BASE}/api/create-checkout-session`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: user.email, userId: user.id, reactivation: true }),
               });
@@ -379,12 +398,60 @@ function CheckoutRedirect({ session, handleSignOut, user, onReactivated, onNativ
 
 
 
-function ResendVerifyScreen() {
+function LinkErrorScreen({ onDismiss }) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
   const inputStyle = { background:'rgba(8,18,36,0.8)', border:'1px solid rgba(201,168,76,0.25)', borderRadius:3, padding:'9px 10px', color:'#f5f0e8', fontSize:13, outline:'none', width:'100%', WebkitTextFillColor:'#f5f0e8' };
+
+  const handleSend = async () => {
+    if (!email || loading) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/send-auth-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'password_reset', email })
+      });
+      if (res.ok) { document.cookie = `dtm-reset-sent-at=${Date.now()}; max-age=1800; path=/; SameSite=Lax`; Preferences.set({ key: 'dtm-reset-sent-at', value: String(Date.now()) }).catch(() => {}); setSent(true); } else { const d = await res.json().catch(()=>({})); setError(d.error || 'Failed to send. Please try again.'); }
+    } catch { setError('Failed to send. Please try again.'); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',height:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
+      <style>{globalStyles}</style>
+      <AppHeader />
+      <div style={{padding:'4px 24px 0',flex:1}}>
+        {sent ? (
+          <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0}}>Please check your email.</p>
+        ) : (
+          <>
+            <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:'0 0 4px'}}>This reset link has already been used.</p>
+            <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:'0 0 20px'}}>Enter your email to receive a new one.</p>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email address" style={inputStyle} />
+            {error && <div style={{fontSize:11,color:'#e02247',marginTop:8,textAlign:'center'}}>{error}</div>}
+            <button onClick={handleSend} disabled={!email||loading} onMouseEnter={e=>{if(email&&!loading)e.currentTarget.style.filter='brightness(1.2)'}} onMouseLeave={e=>e.currentTarget.style.filter='none'} style={{marginTop:12,width:'100%',padding:'13px 0',background:email&&!loading?'linear-gradient(135deg,#c41e3a,#9e1830)':'rgba(196,30,58,0.3)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:email&&!loading?'pointer':'default',transition:'filter 0.15s ease'}}>
+              {loading ? 'Sending...' : 'Send New Link'}
+            </button>
+          </>
+        )}
+      </div>
+      <div style={{padding:'24px 20px 44px',textAlign:'center',flexShrink:0}}>
+        <div onClick={onDismiss} role="button" style={{display:'inline-block',color:'rgba(201,168,76,0.45)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Exit</div>
+      </div>
+    </div>
+  );
+}
+
+function ResendVerifyScreen({ onDismiss }) {
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
+  const inputStyle = { background:'rgba(8,18,36,0.8)', border:'1px solid rgba(201,168,76,0.25)', borderRadius:3, padding:'9px 10px', color:'#f5f0e8', fontSize:15, outline:'none', width:'100%', WebkitTextFillColor:'#f5f0e8' };
 
   const handleResend = async () => {
     if (!email || loading) return;
@@ -402,10 +469,10 @@ function ResendVerifyScreen() {
   };
 
   return (
-    <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
+    <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',height:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
       <style>{globalStyles}</style>
       <AppHeader />
-      <div style={{padding:'4px 24px 0'}}>
+      <div style={{padding:'4px 24px 0',flex:1}}>
         {sent ? (
           <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0}}>Please check your email.</p>
         ) : (
@@ -414,11 +481,14 @@ function ResendVerifyScreen() {
             <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:'0 0 20px'}}>Enter your email to receive a new one.</p>
             <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email address" style={inputStyle} />
             {error && <div style={{fontSize:11,color:'#e02247',marginTop:8,textAlign:'center'}}>{error}</div>}
-            <button onClick={handleResend} disabled={!email||loading} onMouseEnter={e=>{if(email&&!loading)e.currentTarget.style.filter='brightness(1.2)'}} onMouseLeave={e=>e.currentTarget.style.filter='none'} style={{marginTop:12,width:'100%',padding:'13px 0',background:email&&!loading?'linear-gradient(135deg,#c41e3a,#9e1830)':'rgba(196,30,58,0.3)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:11,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:email&&!loading?'pointer':'default',transition:'filter 0.15s ease'}}>
+            <button onClick={handleResend} disabled={!email||loading} onMouseEnter={e=>{if(email&&!loading)e.currentTarget.style.filter='brightness(1.2)'}} onMouseLeave={e=>e.currentTarget.style.filter='none'} style={{marginTop:12,width:'100%',padding:'13px 0',background:email&&!loading?'linear-gradient(135deg,#c41e3a,#9e1830)':'rgba(196,30,58,0.3)',border:'none',borderRadius:3,color:'#f5f0e8',fontSize:12,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:email&&!loading?'pointer':'default',transition:'filter 0.15s ease'}}>
               {loading ? 'Sending...' : 'Send New Link'}
             </button>
           </>
         )}
+      </div>
+      <div style={{padding:'24px 20px 44px',textAlign:'center',flexShrink:0}}>
+        <div onClick={onDismiss} role="button" style={{display:'inline-block',color:'rgba(201,168,76,0.45)',fontSize:11,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Exit</div>
       </div>
     </div>
   );
@@ -496,7 +566,7 @@ function MemberNumberInput({ value, onChange, inputStyle }) {
 }
 
 // ─── Auth Screen ───────────────────────────────────────────────────────────────
-function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogin, onForceLoginClear, forceSignup, onForceSignupClear, onResetComplete, fromEmailLink, onEmailLinkClear, onShowAppBanner, reactivationReturn, onReactivationDismiss, preFillMemberNumber, preFillNonce }) {
+function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogin, onForceLoginClear, forceSignup, onForceSignupClear, onResetComplete, reactivationReturn, onReactivationDismiss, preFillMemberNumber, preFillNonce, forceForgotPassword, onForceForgotPasswordClear }) {
   const [mode, setMode] = useState(() => {
     if (resetToken) return 'resetPassword';
     if (forceSignup) return 'signup';
@@ -508,9 +578,9 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
   });
   useEffect(() => { if (forceSignup) { setMode('signup'); onForceSignupClear?.(); } }, [forceSignup]);
   useEffect(() => { if (forceLogin) { setMode('login'); onForceLoginClear && onForceLoginClear(); } }, [forceLogin]);
+  useEffect(() => { if (forceForgotPassword) { setMode('forgot'); onForceForgotPasswordClear?.(); } }, [forceForgotPassword]);
   useEffect(() => { if (resetToken) setMode('resetPassword'); }, [resetToken]);
-  const showOpenInApp = fromEmailLink && /iPhone|iPad|iPod/.test(navigator.userAgent);
-  const [verifySuccess] = useState(!!verifiedEmail);
+  const verifySuccess = !!verifiedEmail;
   useEffect(() => { if (verifiedUser) { setPendingUser(verifiedUser); setMode('onboarding'); } }, [verifiedUser]);
   const [name, setName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -523,7 +593,6 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
   const [pendingEmail, setPendingEmail] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [resetSuccess, setResetSuccess] = useState(''); // 'password' | 'member' | ''
   const [loading, setLoading] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
 
@@ -567,7 +636,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
       const dupData = await dupCheck.json();
       if (Array.isArray(dupData) && dupData.length > 0) { setLoading(false); return setError('An account already exists with that email'); }
 
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/signup?redirect_to=${encodeURIComponent('dtmhandicap://login')}`, {
         method: "POST", headers: anonHeaders,
         body: JSON.stringify({ email: email.trim().toLowerCase(), password, data: { name: name.trim(), last_name: lastName.trim() } }),
       });
@@ -701,7 +770,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
             </defs>
             <rect x="0" y="0" width="300" height="400" rx="22" fill="#0d1b2e"/>
             <rect x="0" y="0" width="300" height="316" fill="#1a420a" clipPath="url(#lp-cardHero)"/>
-            <rect x="85" y="0" width="130" height="316" fill="#2e8010" clipPath="url(#lp-cardHero)"/>
+            <rect x="80" y="0" width="140" height="316" fill="#2e8010" clipPath="url(#lp-cardHero)"/>
             <rect x="0" y="0" width="10" height="316" fill="#0d1b2e" clipPath="url(#lp-cardHero)"/>
             <rect x="290" y="0" width="10" height="316" fill="#0d1b2e" clipPath="url(#lp-cardHero)"/>
             <rect x="0" y="0" width="300" height="10" fill="#0d1b2e" clipPath="url(#lp-cardHero)"/>
@@ -766,30 +835,13 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
             <rect x="0" y="316" width="300" height="6" fill="#e8b84b" clipPath="url(#lp-cardHero)"/>
             <rect x="0" y="322" width="300" height="78" fill="#0d1b2e" clipPath="url(#lp-cardHero)"/>
             <text x="151.75" y="358" fontFamily="Verdana,sans-serif" fontSize="18" fontWeight="900" fill="#ffffff" textAnchor="middle" letterSpacing="3.5">DOWN THE MIDDLE</text>
-            <text x="151.25" y="377" fontFamily="Verdana,sans-serif" fontSize="10" fill="#c41e3a" fontWeight="700" textAnchor="middle" letterSpacing="2.5">A TRUER GOLF HANDICAP</text>
+            <text x="150.75" y="377" fontFamily="Verdana,sans-serif" fontSize="10" fill="#c41e3a" fontWeight="700" textAnchor="middle" letterSpacing="2.5">A TRUER GOLF HANDICAP</text>
             <rect x="0" y="0" width="300" height="400" rx="22" fill="none" stroke="rgba(232,184,75,0.45)" strokeWidth="2"/>
           </svg>
         </div>
         <button className="auth-btn-primary" style={{...S.btnPrimary, background:'linear-gradient(135deg,#e8b84b,#c49a30)', color:'#0d1b2e'}} onClick={()=>{clearFields();setMode('login');}}>Log In</button>
         <button className="auth-btn-ghost" style={S.btnGhost} onClick={()=>{ if(window.Capacitor?.isNativePlatform?.()) { clearFields(); setMode('signup'); } else window.location.href='https://app.dtmhandicap.com/?screen=signup'; }}>Become a Member</button>
       </div>
-      {reactivationReturn && /iPhone|iPad|iPod/.test(navigator.userAgent) && (
-        <div style={{position:'fixed',inset:0,zIndex:100,display:'flex',flexDirection:'column',justifyContent:'flex-end'}}>
-          <div style={{position:'absolute',inset:0,background:'rgba(5,12,25,0.72)'}} onClick={onReactivationDismiss} />
-          <div style={{position:'relative',background:'#0d1b2e',borderTop:'1px solid rgba(232,184,75,0.25)',borderRadius:'16px 16px 0 0',padding:'28px 24px calc(36px + env(safe-area-inset-bottom))'}}>
-            <div style={{width:36,height:3,background:'rgba(245,240,232,0.15)',borderRadius:2,margin:'0 auto 24px'}} />
-            <div style={{fontSize:9,letterSpacing:3,textTransform:'uppercase',color:'rgba(245,240,232,0.35)',textAlign:'center',marginBottom:10}}>Down The Middle</div>
-            <div style={{fontSize:16,fontWeight:700,color:'#f5f0e8',textAlign:'center',marginBottom:20,letterSpacing:0.5}}>Your membership is now active</div>
-            <button onClick={()=>{ window.location.href='dtmhandicap://payment/reactivated'; }} style={{width:'100%',padding:14,background:'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:4,color:'#0d1b2e',fontSize:12,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>Open the App</button>
-            <div style={{display:'flex',alignItems:'center',gap:12,margin:'16px 0'}}>
-              <div style={{flex:1,height:1,background:'rgba(245,240,232,0.1)'}} />
-              <span style={{fontSize:11,color:'rgba(245,240,232,0.3)',letterSpacing:1}}>or</span>
-              <div style={{flex:1,height:1,background:'rgba(245,240,232,0.1)'}} />
-            </div>
-            <button onClick={()=>{ setMode('login'); onReactivationDismiss(); }} style={{width:'100%',padding:14,background:'none',border:'1px solid rgba(245,240,232,0.12)',borderRadius:4,color:'rgba(245,240,232,0.45)',fontSize:12,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Continue in Browser</button>
-          </div>
-        </div>
-      )}
     </div>
   );
 
@@ -817,23 +869,6 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
     <div className="dtm-app-frame" style={S.wrap}>
       <style>{globalStyles}</style>
       <Header />
-      {showOpenInApp && (
-        <div style={{position:'fixed',inset:0,zIndex:100,display:'flex',flexDirection:'column',justifyContent:'flex-end'}}>
-          <div style={{position:'absolute',inset:0,background:'rgba(5,12,25,0.72)'}} onClick={()=>{ onEmailLinkClear?.(); }} />
-          <div style={{position:'relative',background:'#0d1b2e',borderTop:'1px solid rgba(232,184,75,0.25)',borderRadius:'16px 16px 0 0',padding:'28px 24px calc(36px + env(safe-area-inset-bottom))'}}>
-            <div style={{width:36,height:3,background:'rgba(245,240,232,0.15)',borderRadius:2,margin:'0 auto 24px'}} />
-            <div className="font-verdana" style={{fontSize:9,letterSpacing:3,textTransform:'uppercase',color:'rgba(245,240,232,0.35)',textAlign:'center',marginBottom:10}}>Down The Middle</div>
-            <div className="font-verdana" style={{fontSize:16,fontWeight:700,color:'#f5f0e8',textAlign:'center',marginBottom:20,letterSpacing:0.5}}>For the best experience</div>
-            <button onClick={()=>{ onEmailLinkClear?.(); window.location.href = 'dtmhandicap://'; }} style={{width:'100%',padding:14,background:'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:4,color:'#0d1b2e',fontSize:12,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>Open in the App</button>
-            <div style={{display:'flex',alignItems:'center',gap:12,margin:'16px 0'}}>
-              <div style={{flex:1,height:1,background:'rgba(245,240,232,0.1)'}} />
-              <span style={{fontSize:11,color:'rgba(245,240,232,0.3)',letterSpacing:1}}>or</span>
-              <div style={{flex:1,height:1,background:'rgba(245,240,232,0.1)'}} />
-            </div>
-            <button onClick={()=>{ onEmailLinkClear?.(); }} style={{width:'100%',padding:14,background:'none',border:'1px solid rgba(245,240,232,0.12)',borderRadius:4,color:'rgba(245,240,232,0.45)',fontSize:12,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Continue in Browser</button>
-          </div>
-        </div>
-      )}
       <div style={{...S.body, paddingTop:8}}>
         <button style={S.back} onClick={()=>{clearFields();setMode('landing');}}>← Back</button>
         <div style={S.field}>
@@ -886,7 +921,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
             <div style={{fontSize:28,fontWeight:900,color:'#e8b84b',letterSpacing:2}}>{pendingUser?.memberNumber}</div>
           </div>
           <p style={{margin:0, marginTop:3, fontSize:14.5, color:'rgba(245,240,232,0.9)', lineHeight:1.75, fontWeight:400}}>
-            <span style={{color:'#e8b84b', fontWeight:700}}>Note:</span> As a first time user, you're encouraged to post as many of your prior rounds as you'd like, up to 18 months back. Doing so will provide our model with as much data as possible — enabling us to deliver you an accurate handicap as soon as possible.
+            <span style={{color:'#e8b84b', fontWeight:700}}>Note:</span> As a first time user, you're encouraged to post as many of your prior rounds as you'd like — up to 18 months back. Doing so will provide our model with as much data as possible, enabling us to deliver you an accurate handicap as soon as possible.
           </p>
           <button className="auth-btn-primary" style={{width:'100%', padding:16, background:'linear-gradient(135deg,#e8b84b,#c49a30)', border:'none', borderRadius:3, color:'#0d1b2e', fontSize:13, fontWeight:900, letterSpacing:4, textTransform:'uppercase', cursor:'pointer', marginTop:13}} onClick={()=>{clearFields();setMemberNumber(pendingUser?.memberNumber||'');setMode('login');}}>
             Get Started
@@ -902,7 +937,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
       <Header />
       <div style={{...S.body, paddingTop:8}}>
         <button style={{...S.back, marginBottom:20}} onClick={()=>{clearFields();setMode('login');}}>← Back</button>
-        <div style={{fontSize:14,color:'rgba(245,240,232,0.5)',marginBottom:20,lineHeight:1.6}}>An email with a link to reset your password will be sent to the address below:</div>
+        <div style={{fontSize:14,color:'rgba(245,240,232,0.5)',marginBottom:20,lineHeight:1.6}}>A password reset link will be sent to your email address on file.</div>
         <div style={S.field}><label style={S.label}>Email</label><input style={{...S.input,colorScheme:'dark'}} placeholder="" type="email" value={resetEmail} onChange={e=>setResetEmail(e.target.value)} /></div>
         {error && <div style={S.error}>{error}</div>}
         
@@ -917,7 +952,7 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
       <Header />
       <div style={{...S.body, paddingTop:8}}>
         <button style={{...S.back, marginBottom:20}} onClick={()=>{clearFields();setMode('login');}}>← Back</button>
-        <div style={{fontSize:14,color:'rgba(245,240,232,0.5)',marginBottom:20,lineHeight:1.6}}>An email with your Member # will be sent to the<br/>address below:</div>
+        <div style={{fontSize:13.5,color:'rgba(245,240,232,0.5)',marginBottom:20,lineHeight:1.6}}>Your Member # will be sent to your email address on file.</div>
         <div style={S.field}><label style={S.label}>Email</label><input style={{...S.input,colorScheme:'dark'}} placeholder="" type="email" value={email} onChange={e=>setEmail(e.target.value)} /></div>
         {error && <div style={S.error}>{error}</div>}
         
@@ -933,24 +968,38 @@ function AuthScreen({ onAuth, verifiedEmail, verifiedUser, resetToken, forceLogi
       if (password !== confirmPassword) return setError('Passwords do not match');
       setLoading(true); setError('');
       try {
+        let userEmail = sessionStorage.getItem('dtm-reset-email') || '';
+        try {
+          const meRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${resetToken}` },
+          });
+          const meData = await meRes.json();
+          if (meRes.ok) userEmail = meData.email || meData.user?.email || meData.user_metadata?.email || userEmail;
+        } catch {}
         const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${resetToken}` },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({ password, data: { pw_reset_at: Date.now() } }),
         });
         const data = await res.json();
         if (!res.ok) { setLoading(false); const errText = String(data.message || data.msg || data.error_description || '').toLowerCase(); const isSamePw = data.code === 'same_password' || data.error_code === 'same_password' || errText.includes('different') || errText.includes('same'); return setError(isSamePw ? 'Please choose a different password' : (data.message || data.msg || 'Failed to reset password')); }
-        // Send confirmation email
-        try {
-          const userEmail = data.email || data.user_metadata?.email;
-          if (userEmail) {
-            await fetch(`${API_BASE}/api/send-auth-email`, {
+        if (!userEmail) userEmail = data.email || data.user?.email || data.user_metadata?.email || '';
+        sessionStorage.removeItem('dtm-reset-email');
+        if (userEmail) {
+          try {
+            const emailRes = await fetch(`${API_BASE}/api/send-auth-email`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ type: 'password_changed', email: userEmail }),
             });
-          }
-        } catch {}
+            if (!emailRes.ok) {
+              const emailErr = await emailRes.json().catch(() => ({}));
+              console.error('password_changed email failed:', emailRes.status, emailErr);
+            }
+          } catch (e) { console.error('password_changed email error:', e); }
+        } else {
+          console.error('password_changed email skipped: no email resolved');
+        }
         onResetComplete();
         clearFields();
         setMode('login');
@@ -1023,8 +1072,8 @@ function EntryRow({ entry }) {
         {entry.isUser && <span style={{fontSize:9,color:'rgba(201,168,76,0.5)',letterSpacing:1,marginLeft:6}}>YOU</span>}
       </div>
       <div style={{width:64,textAlign:'center',flexShrink:0}}>
-          <div style={{fontSize:7,fontWeight:400,letterSpacing:2,textTransform:'uppercase',color:'rgba(232,184,75,0.6)',marginBottom:3}}>Streak</div>
           <div style={{fontSize:22,fontWeight:800,color,lineHeight:1}}>{streak}</div>
+          <div style={{fontSize:7,fontWeight:400,letterSpacing:2,textTransform:'uppercase',color:'rgba(232,184,75,0.6)',marginTop:3}}>Streak</div>
         </div>
     </div>
   );
@@ -1365,7 +1414,7 @@ function SupportPanel({ user, onBack, onHome }) {
           </div>
           <div style={{fontSize:11,fontWeight:700,letterSpacing:4,textTransform:'uppercase',color:'#e8b84b',marginTop:18}}>Support</div>
         </div>
-        <div style={{height:2,background:'rgba(201,168,76,0.45)',flexShrink:0}} />
+        <div style={{height:2,background:'rgba(201,168,76,0.45)',margin:'0 20px'}} />
         <div style={{flex:1,overflowY:'auto',padding:'20px'}}>
           {sent ? (
             <div style={{textAlign:'center',padding:'16px 0',display:'flex',flexDirection:'column',alignItems:'center',gap:16}}>
@@ -1380,7 +1429,7 @@ function SupportPanel({ user, onBack, onHome }) {
             <>
               <div style={{fontSize:13,color:'#f5f0e8',fontWeight:400,lineHeight:1.7,marginBottom:20}}>
                 <div>Have an issue or a question?</div>
-                <div>Send us a message in the form provided below:</div>
+                <div>Send us a message in the form provided below.</div>
               </div>
               <div style={{marginBottom:12}}>
                 <label style={labelStyle}>Name</label>
@@ -1446,22 +1495,6 @@ function ProfileDrawer({ user, roundCount, handicap, userRounds, authHeadersAsyn
     setTimeout(attempt, 650);
   };
 
-  useEffect(() => {
-    if (!showPwForm) return;
-    const attempt = () => {
-      const container = scrollContainerRef.current;
-      const el = pwFormRef.current;
-      if (!container || !el) return;
-      const cTop = container.getBoundingClientRect().top;
-      const eTop = el.getBoundingClientRect().top;
-      const delta = (eTop - cTop) - 8;
-      if (delta > 0) container.scrollTop += delta;
-    };
-    const t1 = setTimeout(attempt, 150);
-    const t2 = setTimeout(attempt, 450);
-    const t3 = setTimeout(attempt, 800);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
-  }, [showPwForm]);
 
 const [showDeleteForm, setShowDeleteForm] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -1503,17 +1536,21 @@ const [showDeleteForm, setShowDeleteForm] = useState(false);
       const existing = JSON.parse(localStorage.getItem('sb-session') || '{}');
       localStorage.setItem('sb-session', JSON.stringify({ ...existing, access_token, refresh_token, expires_at, user: verifyUser || existing.user }));
     } catch {}
-    setPwSuccess('Password changed');
-    setPwForm({ current:'', next:'', confirm:'' });
-    setPwLoading(false);
-    setTimeout(() => { setPwSuccess(''); setShowPwForm(false); }, 1500);
     try {
-      await fetch(`${API_BASE}/api/send-auth-email`, {
+      const emailRes = await fetch(`${API_BASE}/api/send-auth-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'password_changed', email: user.email }),
       });
-    } catch {}
+      if (!emailRes.ok) {
+        const emailErr = await emailRes.json().catch(() => ({}));
+        console.error('password_changed email failed:', emailRes.status, emailErr);
+      }
+    } catch (e) { console.error('password_changed email error:', e); }
+    setPwSuccess('Password changed');
+    setPwForm({ current:'', next:'', confirm:'' });
+    setPwLoading(false);
+    setTimeout(() => { setPwSuccess(''); setShowPwForm(false); }, 1500);
   };
 
   const handleEmailChange = async () => {
@@ -1601,7 +1638,7 @@ const [showDeleteForm, setShowDeleteForm] = useState(false);
               <div style={{fontSize:9,fontWeight:700,letterSpacing:2,textTransform:'uppercase',color:'#84e040',background:'rgba(132,224,64,0.1)',border:'1px solid rgba(132,224,64,0.3)',borderRadius:2,padding:'3px 8px'}}>Active</div>
             </div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-              <div style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(201,168,76,0.6)'}}>Plan</div>
+              <div style={{fontSize:9,fontWeight:700,letterSpacing:3,textTransform:'uppercase',color:'rgba(201,168,76,0.6)'}}>Membership Plan</div>
               <div style={{fontSize:12,fontWeight:600,color:'#f5f0e8'}}>Annual — $49.99/yr</div>
             </div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
@@ -1613,7 +1650,7 @@ const [showDeleteForm, setShowDeleteForm] = useState(false);
               <div style={{fontSize:12,fontWeight:600,color:'#f5f0e8'}}>{user.paymentProvider === 'apple' ? 'Apple In-App Purchase' : 'Stripe'}</div>
             </div>
           </div>
-          <div style={{height:1,background:'rgba(201,168,76,0.08)',marginBottom:16}}/>
+          <div style={{height:1,background:'rgba(201,168,76,0.2)',marginBottom:16}}/>
           {user.paymentProvider === 'apple' ? (
             <>
               {showIAPMessage && (
@@ -1807,7 +1844,7 @@ if (subPanel === 'account' && showDeleteForm) return (
             </div>
           </div>
 
-          <div style={{height:1,background:'rgba(201,168,76,0.08)',marginBottom:28}} />
+          <div style={{height:1,background:'rgba(201,168,76,0.2)',marginBottom:28}} />
 
           <div style={{display:'flex',flexDirection:'column',gap:28}}>
             <div role="button" onClick={()=>{setShowEmailForm(true);setEmailError('');setEmailSuccess('');setEmailForm({next:'',confirm:''});}} onMouseEnter={e=>e.currentTarget.style.background='rgba(232,184,75,0.06)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(8,18,36,0.6)'} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'11px 14px',background:'rgba(8,18,36,0.6)',border:'1px solid rgba(201,168,76,0.35)',borderRadius:4,cursor:'pointer',WebkitTapHighlightColor:'rgba(0,0,0,0)',userSelect:'none'}}>
@@ -1901,7 +1938,6 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
   const [editSlope, setEditSlope] = useState(false);
   const [courseSearch, setCourseSearch] = useState("");
   const [courseFilter, setCourseFilter] = useState("all");
-  const [showCourseInfo, setShowCourseInfo] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [confirmPost, setConfirmPost] = useState(false);
   const [sameDayModal, setSameDayModal] = useState(false);
@@ -2017,7 +2053,7 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
 
         // Round posted events
         for (const r of rounds) {
-          feed.push({ type: 'round', name, course: r.course, score: r.score, date: r.date, created_at: r.created_at, id: `round-${pid}-${r.id}` });
+          feed.push({ type: 'round', name, course: r.course, course_played: r.course_played || null, score: r.score, date: r.date, created_at: r.created_at, id: `round-${pid}-${r.id}` });
         }
 
         // Handicap integer change events
@@ -2197,6 +2233,39 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
   // Load partners and home feed on mount
   useEffect(() => { fetchPartners(); setTimeout(() => fetchHomeFeed(), 500); }, []);
 
+  // Register device for push notifications (iOS native only)
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let registered = false;
+    const setup = async () => {
+      try {
+        const permission = await PushNotifications.requestPermissions();
+        if (permission.receive !== 'granted') return;
+        await PushNotifications.register();
+        registered = true;
+        await PushNotifications.addListener('registration', async (token) => {
+          try {
+            const headers = await authHeadersAsync();
+            await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}`, {
+              method: 'PATCH',
+              headers: { ...headers, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ push_token: token.value }),
+            });
+          } catch (e) { console.error('push token save failed', e); }
+        });
+        await PushNotifications.addListener('registrationError', (err) => {
+          console.error('Push registration error:', err);
+        });
+        await PushNotifications.addListener('pushNotificationActionPerformed', () => {
+          // User tapped a notification — take them to the home feed
+          setTab('home');
+        });
+      } catch (e) { console.error('Push setup error:', e); }
+    };
+    setup();
+    return () => { if (registered) PushNotifications.removeAllListeners(); };
+  }, [user.id]);
+
   useEffect(() => {
     const dismiss = () => {
       document.querySelectorAll('.info-tooltip.active').forEach(el => el.classList.remove('active'));
@@ -2231,6 +2300,14 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
       setLoadingRounds(false);
     };
     fetchRounds();
+    // Update last_seen on every app load — fire and forget
+    authHeadersAsync().then(headers =>
+      fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user.id}`, {
+        method: 'PATCH',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ last_seen: new Date().toISOString() }),
+      }).catch(() => {})
+    );
   }, [user.id]);
 
   const handicap = calcHandicap(rounds);
@@ -2256,6 +2333,23 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
       const row = Array.isArray(data) ? data[0] : data;
       if (res.ok && row?.id) {
         setRounds(prev => [row, ...prev].sort((a, b) => new Date(b.date) - new Date(a.date) || b.id - a.id));
+        // Notify connected partners — only for rounds played today
+        if ((date || todayStr) === todayStr) {
+        const coursePlayed = (golfApiClub && selectedGolfCourse)
+          ? (golfApiClub.courses.find(c => c.courseID === selectedGolfCourse)?.courseName || null)
+          : null;
+        fetch(`${API_BASE}/api/notify-partners`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            posterName: user.name || 'Your partner',
+            course: course.trim() || 'Unknown Course',
+            score: s,
+            coursePlayed,
+          }),
+        }).catch(() => {}); // fire-and-forget — don't block UI on this
+        } // end today-only guard
         // Save manual course to user's personal list if not from main DB
         if (!selectedCourse && course.trim()) {
           try {
@@ -2301,14 +2395,15 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
     setConfirmPost(false);
     setForm({ course:"", score:"", rating:"", slope:"", tee:"", date:localDateStr() });
     setCourseSearch(""); setSelectedCourse(null);
-    setGolfApiClub(null); setSelectedGolfCourse(''); setGolfApiResults([]); setGolfClubName('');
+    setGolfApiClub(null); setSelectedGolfCourse(''); setGolfApiResults([]);
     setManualCourseEntered(false);
   };
 
   const minScore = rounds.length ? Math.min(...rounds.map(r => r.score)) : null;
   const minScoreRound = useMemo(() => {
     if (!rounds.length) return null;
-    return rounds.reduce((best, r) => r.score < (best?.score ?? Infinity) ? r : best, null);
+    const sorted = [...rounds].sort((a, b) => new Date(b.date) - new Date(a.date) || b.id - a.id);
+    return sorted.reduce((best, r) => r.score < (best?.score ?? Infinity) ? r : best, null);
   }, [rounds]);
   const ytdRounds = rounds.filter(r => new Date(r.date).getFullYear() === new Date().getFullYear()).length;
   const lowestHandicap = useMemo(() => {
@@ -2335,7 +2430,25 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
     }
     return minDate;
   }, [rounds]);
+  const minScoreCount = useMemo(() => {
+    if (minScore === null) return 0;
+    return rounds.filter(r => r.score === minScore).length;
+  }, [rounds, minScore]);
+  const lowestHandicapCount = useMemo(() => {
+    if (lowestHandicap === null || lowestHandicap === undefined) return 0;
+    const target = Math.floor(lowestHandicap * 10) / 10;
+    const sorted = [...rounds].filter(r => r.score != null && r.rating != null).sort((a, b) => new Date(b.date) - new Date(a.date) || b.id - a.id);
+    let count = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      const subset = sorted.slice(i);
+      if (subset.length < 10) break;
+      const h = calcHandicapDecimal(subset);
+      if (h !== null && Math.floor(h * 10) / 10 === target) count++;
+    }
+    return count;
+  }, [rounds, lowestHandicap]);
   const [expandedStat, setExpandedStat] = useState(null);
+  useEffect(() => { if (tab !== 'stats') setExpandedStat(null); }, [tab]);
 
   // Deletable = posted within 24 hours (using created_at from Supabase)
   const isDeletable = (round) => {
@@ -2554,7 +2667,11 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
                 ? <div style={{fontSize:12,color:'rgba(245,240,232,0.3)',fontStyle:'italic',paddingLeft:2,lineHeight:1.7}}>No news to share.{partners.length > 0 && ' Somebody make a tee time!'}</div>
                 : homeFeed.map(item => {
                     const timeAgo = (dateStr) => {
-                      const diff = Math.max(0, Math.floor((Date.now() - new Date(dateStr)) / 86400000));
+                      const now = new Date();
+                      const then = new Date(dateStr);
+                      const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                      const thenDay = new Date(then.getFullYear(), then.getMonth(), then.getDate());
+                      const diff = Math.round((nowDay - thenDay) / 86400000);
                       if (diff === 0) return 'Today';
                       if (diff === 1) return 'Yesterday';
                       return `${diff} days ago`;
@@ -2571,9 +2688,9 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
                         {item.type === 'round' && (
                           <>
                             <div style={{fontSize:12,color:'#f5f0e8',fontWeight:500,lineHeight:1.6}}>
-                              <span style={{color:'#f5f0e8'}}>{item.name}</span> posted a <span style={{color:'#f5f0e8'}}>{item.score}</span> at <span style={{color:'#f5f0e8'}}>{item.course}</span>
+                              <span style={{color:'#f5f0e8'}}>{item.name}</span> posted a <span style={{color:'#f5f0e8'}}>{item.score}</span> at <span style={{color:'#f5f0e8'}}>{item.course}{item.course_played ? ` – ${item.course_played}` : ''}</span>
                             </div>
-                            <div style={{fontSize:9,color:'rgba(245,240,232,0.35)',letterSpacing:1,marginTop:4}}>{timeAgo(item.created_at)}</div>
+                            <div style={{fontSize:9,color:'rgba(245,240,232,0.35)',letterSpacing:1,marginTop:4}}>{timeAgo(item.date)}</div>
                           </>
                         )}
                         {item.type === 'handicap' && (
@@ -2581,7 +2698,7 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
                             <div style={{fontSize:12,color:'#f5f0e8',fontWeight:500,lineHeight:1.6}}>
                               <span style={{color:'#f5f0e8'}}>{item.name}'s</span> handicap moved from <span style={{color:'#f5f0e8'}}>{item.from<0?`+${Math.abs(item.from)}`:item.from}</span> to <span style={{color:'#f5f0e8'}}>{item.to<0?`+${Math.abs(item.to)}`:item.to}</span>
                             </div>
-                            <div style={{fontSize:9,color:'rgba(245,240,232,0.35)',letterSpacing:1,marginTop:4}}>{timeAgo(item.created_at)}</div>
+                            <div style={{fontSize:9,color:'rgba(245,240,232,0.35)',letterSpacing:1,marginTop:4}}>{timeAgo(item.date)}</div>
                           </>
                         )}
                         {item.type === 'streak' && (
@@ -2589,7 +2706,7 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
                             <div style={{fontSize:12,color:'#f5f0e8',fontWeight:500,lineHeight:1.6}}>
                               <span style={{color:'#f5f0e8'}}>{item.name}</span> {item.isFirst ? `is on a ${item.trend === 'hot' ? 'hot' : 'cold'} streak` : `has extended their ${item.trend === 'hot' ? 'hot' : 'cold'} streak`}
                             </div>
-                            <div style={{fontSize:9,color:'rgba(245,240,232,0.35)',letterSpacing:1,marginTop:4}}>{timeAgo(item.created_at)}</div>
+                            <div style={{fontSize:9,color:'rgba(245,240,232,0.35)',letterSpacing:1,marginTop:4}}>{timeAgo(item.date)}</div>
                           </>
                         )}
                         {item.type === 'lowScore' && (
@@ -2597,7 +2714,7 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
                             <div style={{fontSize:12,color:'#f5f0e8',fontWeight:500,lineHeight:1.6}}>
                               <span style={{color:'#f5f0e8'}}>{item.name}</span> posted a new all-time low score on DTM
                             </div>
-                            <div style={{fontSize:9,color:'rgba(245,240,232,0.35)',letterSpacing:1,marginTop:4}}>{timeAgo(item.created_at)}</div>
+                            <div style={{fontSize:9,color:'rgba(245,240,232,0.35)',letterSpacing:1,marginTop:4}}>{timeAgo(item.date)}</div>
                           </>
                         )}
                         {item.type === 'lowHandicap' && (
@@ -2605,7 +2722,7 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
                             <div style={{fontSize:12,color:'#f5f0e8',fontWeight:500,lineHeight:1.6}}>
                               <span style={{color:'#f5f0e8'}}>{item.name}</span> achieved a new all-time low handicap on DTM
                             </div>
-                            <div style={{fontSize:9,color:'rgba(245,240,232,0.35)',letterSpacing:1,marginTop:4}}>{timeAgo(item.created_at)}</div>
+                            <div style={{fontSize:9,color:'rgba(245,240,232,0.35)',letterSpacing:1,marginTop:4}}>{timeAgo(item.date)}</div>
                           </>
                         )}
                         </div>
@@ -2619,18 +2736,14 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
         {/* Post A Round */}
         {tab==="calculator"&&(
           <div style={{...S.card,position:'relative'}}>
-            {(selectedCourse||golfApiClub||manualCourseEntered) && <button onClick={()=>{setForm({course:"",score:"",rating:"",slope:"",tee:"",date:localDateStr()});setSelectedCourse(null);setCourseSearch('');setEditRating(false);setEditSlope(false);setAdded(false);setGolfApiClub(null);setSelectedGolfCourse('');setGolfApiResults([]);setGolfClubName('');setManualCourseEntered(false);}} style={{position:'absolute',top:12,right:12,background:'none',border:'none',color:'rgba(201,168,76,0.5)',fontSize:9,fontWeight:700,letterSpacing:1.5,textTransform:'uppercase',cursor:'pointer',padding:0,zIndex:10}}>Clear</button>}
+            {(selectedCourse||golfApiClub||manualCourseEntered) && <button onClick={()=>{setForm({course:"",score:"",rating:"",slope:"",tee:"",date:localDateStr()});setSelectedCourse(null);setCourseSearch('');setEditRating(false);setEditSlope(false);setAdded(false);setGolfApiClub(null);setSelectedGolfCourse('');setGolfApiResults([]);setManualCourseEntered(false);}} style={{position:'absolute',top:12,right:12,background:'none',border:'none',color:'rgba(201,168,76,0.5)',fontSize:9,fontWeight:700,letterSpacing:1.5,textTransform:'uppercase',cursor:'pointer',padding:0,zIndex:10}}>Clear</button>}
             <div style={{position:'relative',marginBottom:12}}>
               <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
                 <label style={{...S.label,marginBottom:0}}>Golf Course</label>
-                <div style={{position:'relative'}}>
-                  <div onClick={()=>setShowCourseInfo(p=>!p)} style={{width:14,height:14,borderRadius:'50%',background:'transparent',border:'1px solid rgba(201,168,76,0.5)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:9,fontWeight:700,color:'rgba(201,168,76,0.7)',lineHeight:1}}>i</div>
-                  {showCourseInfo&&(
-                    <div onClick={()=>setShowCourseInfo(false)} style={{position:'absolute',top:-60,left:20,background:'rgba(8,18,36,0.97)',border:'2px solid rgba(201,168,76,0.5)',borderRadius:4,padding:'8px 10px',width:200,fontSize:10,color:'rgba(180,175,170,0.8)',lineHeight:1.5,zIndex:50,letterSpacing:0.3,fontWeight:600}}>
-                      Can't find where you played?<br/>Enter the course name and all other information from your round manually instead
-                    </div>
-                  )}
-                </div>
+                <span className="info-tooltip" onClick={e=>{e.stopPropagation();e.currentTarget.classList.toggle('active');}} style={{marginLeft:-3}}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="rgba(201,168,76,0.75)" strokeWidth="1.5"/><line x1="12" y1="11" x2="12" y2="17" stroke="rgba(201,168,76,0.75)" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="1" fill="rgba(201,168,76,0.75)"/></svg>
+                  <span className="tooltip-text" style={{width:200,lineHeight:'1.5',whiteSpace:'normal'}}>Can't find where you played? Enter the course name and all other information from your round manually instead</span>
+                </span>
               </div>
               <input style={{...S.input,paddingLeft:7}} placeholder="Search..." value={form.course}
                 onChange={e=>{
@@ -2667,7 +2780,7 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
                     {!golfApiLoading&&apiMatches.map(c=>(
                       <div key={'api-'+c.golfapi_club_id} onMouseDown={async()=>{
                         setShowDropdown(false);setGolfApiResults([]);
-                        setForm(p=>({...p,course:c.name,rating:'',tee:''}));setCourseSearch(c.name);setGolfClubName(c.name);
+                        setForm(p=>({...p,course:c.name,rating:'',tee:''}));setCourseSearch(c.name);
                         setGolfApiFetchLoading(true);
                         if(c.courses&&c.courses.length===1){
                           try{const res=await fetch(`${API_BASE}/api/golf-search`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'fetchCourse',courseId:c.courses[0].courseID,clubId:c.golfapi_club_id,location:c.location,clubName:c.name})});const data=await res.json();if(res.ok&&data.course){setSelectedCourse(data.course);setCourses(prev=>{if(prev.some(p=>p.id===data.course.id))return prev;return[...prev,data.course].sort((a,b)=>a.name.localeCompare(b.name));});}}catch{}
@@ -2824,12 +2937,15 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
           const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
           const todayD=new Date();
           const months=Array.from({length:12},(_,i)=>{const d=new Date(todayD.getFullYear(),todayD.getMonth()-11+i,1);return{label:MONTHS[d.getMonth()],year:d.getFullYear(),month:d.getMonth()};});
+          const ttmStartDate=new Date(todayD.getFullYear(),todayD.getMonth()-11,1);
           const data=months.map(({label,year,month})=>{
             const isCurrentMonth = year===todayD.getFullYear() && month===todayD.getMonth();
             const snapshotDate = new Date(year,month+1,1);
-            const r2 = isCurrentMonth 
+            const r2 = isCurrentMonth
               ? rounds.filter(r=>r.score!=null&&r.rating!=null).sort((a,b)=>new Date(b.date)-new Date(a.date))
               : rounds.filter(r=>new Date(r.date+'T00:00:00')<snapshotDate).sort((a,b)=>new Date(b.date)-new Date(a.date));
+            const hasTTMRounds=r2.some(r=>new Date(r.date+'T00:00:00')>=ttmStartDate);
+            if(!hasTTMRounds)return{label,value:null};
             return{label,value: isCurrentMonth ? calcHandicapDecimal(r2, null) : calcHandicapDecimal(r2, snapshotDate)};
           });
           const withVal=data.filter(m=>m.value!==null);
@@ -2841,11 +2957,14 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
           return(
             <>
               <div style={S.statGrid}>
-                <div style={S.statBox}><div style={S.statLabel}>All-Time<br/>Rounds Posted</div><div style={S.statVal}>{rounds.length.toLocaleString()}</div></div>
-                <div style={S.statBox}><div style={{...S.statLabel,marginTop:5}}>Rounds Posted YTD</div><div style={S.statVal}>{ytdRounds}</div></div>
+                <div style={{...S.statBox,justifyContent:'flex-start'}}><div style={{...S.statLabel,minHeight:26,display:'flex',flexDirection:'column',justifyContent:'center',textAlign:'center'}}>All-Time<br/>Rounds Posted</div><div style={S.statVal}>{rounds.length.toLocaleString()}</div></div>
+                <div style={{...S.statBox,justifyContent:'flex-start',paddingTop:13}}><div style={{...S.statLabel,minHeight:26,display:'flex',flexDirection:'column',justifyContent:'center',textAlign:'center'}}>Rounds Posted YTD</div><div style={S.statVal}>{ytdRounds}</div></div>
                 <div onClick={()=>setExpandedStat(p=>p==='score'?null:'score')} style={{...S.statBox,position:'relative',cursor:'pointer',border:expandedStat==='score'?'1px solid rgba(232,184,75,0.55)':'1px solid rgba(201,168,76,0.15)',transition:'border-color 0.2s',overflow:'hidden'}}>
                   <div style={S.statLabel}>Lowest Score</div>
-                  <div style={S.statVal}>{minScore??'—'}</div>
+                  <div style={{display:'flex',alignItems:'baseline',justifyContent:'center',gap:4}}>
+                    <div style={S.statVal}>{minScore??'—'}</div>
+                    {minScoreCount > 1 && <span style={{fontSize:10,color:'rgba(232,184,75,0.6)',fontWeight:600,letterSpacing:0.5}}>({minScoreCount})</span>}
+                  </div>
                   <div style={{maxHeight:expandedStat==='score'&&minScoreRound?48:0,opacity:expandedStat==='score'&&minScoreRound?1:0,transition:'max-height 0.25s ease, opacity 0.2s ease',overflow:'hidden'}}>
                     <div style={{fontSize:10,color:'rgba(180,175,170,0.7)',marginTop:8,lineHeight:1.6}}>
                       <div>{minScoreRound?new Date(minScoreRound.date+'T00:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}):''}</div>
@@ -2856,7 +2975,10 @@ function AppContent({ user, onSignOut, onAccountDeleted, onUserUpdate }) {
                 </div>
                 <div onClick={()=>setExpandedStat(p=>p==='hcp'?null:'hcp')} style={{...S.statBox,position:'relative',cursor:'pointer',border:expandedStat==='hcp'?'1px solid rgba(232,184,75,0.55)':'1px solid rgba(201,168,76,0.15)',transition:'border-color 0.2s',overflow:'hidden'}}>
                   <div style={S.statLabel}>Lowest Handicap</div>
-                  <div style={S.statVal}>{lowestHandicap!==null&&lowestHandicap!==undefined?(lowestHandicap<0?('+'+(Math.floor(Math.abs(lowestHandicap)*10)/10).toFixed(1)):(Math.floor(lowestHandicap*10)/10).toFixed(1)):'—'}</div>
+                  <div style={{display:'flex',alignItems:'baseline',justifyContent:'center',gap:4}}>
+                    <div style={S.statVal}>{lowestHandicap!==null&&lowestHandicap!==undefined?(lowestHandicap<0?('+'+(Math.floor(Math.abs(lowestHandicap)*10)/10).toFixed(1)):(Math.floor(lowestHandicap*10)/10).toFixed(1)):'—'}</div>
+                    {lowestHandicapCount > 1 && <span style={{fontSize:10,color:'rgba(232,184,75,0.6)',fontWeight:600,letterSpacing:0.5}}>({lowestHandicapCount})</span>}
+                  </div>
                   <div style={{maxHeight:expandedStat==='hcp'&&lowestHandicapDate?28:0,opacity:expandedStat==='hcp'&&lowestHandicapDate?1:0,transition:'max-height 0.25s ease, opacity 0.2s ease',overflow:'hidden'}}>
                     <div style={{fontSize:10,color:'rgba(180,175,170,0.7)',marginTop:8}}>{lowestHandicapDate?new Date(lowestHandicapDate+'T00:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}):''}</div>
                   </div>
@@ -3005,12 +3127,12 @@ export default function GolfHandicapApp() {
   const [forceSignup, setForceSignup] = useState(false);
   const [preFillMemberNumber, setPreFillMemberNumber] = useState('');
   const [preFillNonce, setPreFillNonce] = useState(0);
-  const [fromEmailLink, setFromEmailLink] = useState(false);
   const [reactivationReturn, setReactivationReturn] = useState(false);
   const [resetToken, setResetToken] = useState(() => window.Capacitor?.isNativePlatform?.() ? null : (sessionStorage.getItem('dtm-reset-token') || null));
   const [exchangeError, setExchangeError] = useState(null);
   const [linkError, setLinkError] = useState(false);
   const [resendVerify, setResendVerify] = useState(false);
+  const [forceForgotPassword, setForceForgotPassword] = useState(false);
   const universalCodePending = useRef(false);
 
   useEffect(() => {
@@ -3054,6 +3176,8 @@ export default function GolfHandicapApp() {
     const handleResetUrl = (url) => {
       const token = decodeURIComponent(new URLSearchParams(url.split('?')[1] || '').get('token') || '');
       if (!token) return;
+      setLinkError(false);
+      setResendVerify(false);
       setResetToken(token);
       setAuthLoading(false);
     };
@@ -3062,7 +3186,17 @@ export default function GolfHandicapApp() {
       const hashParams = new URLSearchParams(hash);
       const accessToken = hashParams.get('access_token');
       const refreshToken = hashParams.get('refresh_token');
+      const type = hashParams.get('type');
       if (!accessToken) return;
+      if (type === 'recovery') {
+        sessionStorage.setItem('dtm-reset-token', accessToken);
+        Preferences.set({ key: 'dtm-pw-reset-at', value: String(Date.now()) }).catch(() => {});
+        setLinkError(false);
+        setResendVerify(false);
+        setResetToken(accessToken);
+        setAuthLoading(false);
+        return;
+      }
       setResendVerify(false);
       setAuthLoading(true);
       try {
@@ -3079,10 +3213,15 @@ export default function GolfHandicapApp() {
           });
           if (pr.ok) { profile = await pr.json(); break; }
         }
-        const session = { access_token: accessToken, refresh_token: refreshToken || null, user: userData };
-        localStorage.setItem('sb-session', JSON.stringify(session));
-        await Purchases.logIn({ appUserID: userData.id }).catch(() => {});
-        setAuthUser({ id: userData.id, name: profile?.name || '', lastName: profile?.last_name || '', email: profile?.email || userData.email, memberNumber: profile?.member_number || null, createdAt: profile?.created_at || null, subscribed: profile?.subscribed || false, subscriptionRenewsAt: profile?.subscription_renews_at || null, stripeCustomerId: profile?.stripe_customer_id || null, paymentProvider: profile?.payment_provider || null });
+        const userObj = { id: userData.id, name: profile?.name || '', lastName: profile?.last_name || '', email: profile?.email || userData.email, memberNumber: profile?.member_number || null, createdAt: profile?.created_at || null, subscribed: profile?.subscribed || false, subscriptionRenewsAt: profile?.subscription_renews_at || null, stripeCustomerId: profile?.stripe_customer_id || null, paymentProvider: profile?.payment_provider || null };
+        if (profile?.subscribed) {
+          setWelcomeUser(userObj);
+        } else {
+          const session = { access_token: accessToken, refresh_token: refreshToken || null, user: userData };
+          localStorage.setItem('sb-session', JSON.stringify(session));
+          await Purchases.logIn({ appUserID: userData.id }).catch(() => {});
+          setAuthUser(userObj);
+        }
       } catch {}
       setAuthLoading(false);
     };
@@ -3112,11 +3251,17 @@ export default function GolfHandicapApp() {
           }
           accessToken = exchangeData.access_token;
           userData = exchangeData.user;
+          if (url.includes('/reset-link') || url.includes('source=reset')) {
+            setLinkError(false); setResendVerify(false); setResetToken(accessToken);
+            universalCodePending.current = false; setAuthLoading(false); return;
+          }
           const session = { access_token: accessToken, refresh_token: exchangeData.refresh_token || null, expires_at: exchangeData.expires_in ? Math.floor(Date.now()/1000) + exchangeData.expires_in : null, user: userData };
           localStorage.setItem('sb-session', JSON.stringify(session));
         } else if (hashToken) {
           accessToken = hashToken;
           if (hashType === 'recovery') {
+            setLinkError(false);
+            setResendVerify(false);
             setAuthUser(null);
             setWelcomeUser(null);
             setResetToken(accessToken);
@@ -3163,6 +3308,26 @@ export default function GolfHandicapApp() {
       universalCodePending.current = false;
       setAuthLoading(false);
     };
+    const processResetVerify = async (url) => {
+      try {
+        const su = decodeURIComponent(url.split('?u=')[1] || '');
+        if (!su) { setForceForgotPassword(true); setAuthLoading(false); return; }
+        const tok = new URL(su).searchParams.get('token');
+        if (!tok) { setForceForgotPassword(true); setAuthLoading(false); return; }
+        const vr = await fetch(`${SUPABASE_URL}/auth/v1/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY }, body: JSON.stringify({ token_hash: tok, type: 'recovery' }) });
+        const vd = await vr.json();
+        if (vr.ok && vd.access_token) { sessionStorage.setItem('dtm-reset-token', vd.access_token); if (vd.user?.email) sessionStorage.setItem('dtm-reset-email', vd.user.email); clearResetMarkers(); setLinkError(false); setResendVerify(false); setResetToken(vd.access_token); setAuthLoading(false); }
+        else { setForceForgotPassword(true); setAuthLoading(false); }
+      } catch(e) { setForceForgotPassword(true); setAuthLoading(false); }
+    };
+    const handleResetStart = async (url) => {
+      await processResetVerify(url);
+    };
+    const handleResetError = async () => {
+      if (await checkResetMarker()) { clearResetMarkers(); setForceForgotPassword(true); }
+      else { setResendVerify(true); }
+      setAuthLoading(false);
+    };
     const dispatchUniversalUrl = (url) => {
       if (!url) return false;
       const hasCode = new URLSearchParams(url.split('?')[1] || '').get('code');
@@ -3170,13 +3335,21 @@ export default function GolfHandicapApp() {
       if (hasCode || hasHashToken) { skipSessionRestore.current = true; handleUniversalVerifyCode(url); return true; }
       return false;
     };
-    CapApp.getLaunchUrl().then(result => {
+    CapApp.getLaunchUrl().then(async result => {
       if (!result?.url) { launchUrlResolved.current = true; return; }
-      if (result.url.includes('payment/reactivated')) { launchUrlResolved.current = true; handleReactivationUrl(); }
+      if (result.url.startsWith('dtmhandicap://reset-start')) { launchUrlResolved.current = true; skipSessionRestore.current = true; await handleResetStart(result.url); }
+      else if (result.url.startsWith('dtmhandicap://error') || result.url.includes('error=')) { launchUrlResolved.current = true; skipSessionRestore.current = true; await handleResetError(); }
+      else if (result.url.includes('payment/reactivated')) { launchUrlResolved.current = true; handleReactivationUrl(); }
       else if (result.url.includes('verified')) { launchUrlResolved.current = true; handleVerifiedUrl(result.url); }
       else if (result.url.includes('reset?token')) { launchUrlResolved.current = true; handleResetUrl(result.url); }
       else if (result.url.includes('access_token=')) { skipSessionRestore.current = true; launchUrlResolved.current = true; handleMagicLinkUrl(result.url); }
-      else if (result.url.includes('error=')) { launchUrlResolved.current = true; skipSessionRestore.current = true; if (result.url.includes('/reset-link') || result.url.includes('ltype=reset')) { setLinkError(true); } else { setResendVerify(true); } setAuthLoading(false); }
+      else if (result.url === 'dtmhandicap://open') { launchUrlResolved.current = true; }
+      else if (result.url.includes('/open.html') && new URLSearchParams(result.url.split('?')[1] || '').get('type') === 'reset') {
+        launchUrlResolved.current = true; skipSessionRestore.current = true;
+        const rawQ = result.url.split('?')[1] || '';
+        const uRaw = rawQ.split('&').find(p => p.startsWith('u='))?.slice(2) || '';
+        if (uRaw) { await processResetVerify('reset?u=' + uRaw); } else { setForceForgotPassword(true); setAuthLoading(false); }
+      }
       else {
         if (dispatchUniversalUrl(result.url)) { launchUrlResolved.current = true; return; }
         const params = new URLSearchParams(result.url.split('?')[1] || '');
@@ -3190,11 +3363,19 @@ export default function GolfHandicapApp() {
     }).catch(() => { launchUrlResolved.current = true; });
     CapApp.addListener('appUrlOpen', async (data) => {
       try { await Browser.close(); } catch {}
-      if (data.url?.includes('payment/reactivated')) handleReactivationUrl();
+      if (data.url?.startsWith('dtmhandicap://reset-start')) { await handleResetStart(data.url); return; }
+      else if (data.url?.startsWith('dtmhandicap://error') || data.url?.includes('error=')) { await handleResetError(); return; }
+      else if (data.url?.includes('payment/reactivated')) handleReactivationUrl();
       else if (data.url?.includes('verified')) handleVerifiedUrl(data.url);
       else if (data.url?.includes('reset?token')) handleResetUrl(data.url);
       else if (data.url?.includes('access_token=')) { handleMagicLinkUrl(data.url); }
-      else if (data.url?.includes('error=')) { if (data.url.includes('/reset-link') || data.url.includes('ltype=reset')) { setLinkError(true); } else { setResendVerify(true); } setAuthLoading(false); }
+      else if (data.url === 'dtmhandicap://open') { return; }
+      else if (data.url?.includes('/open.html') && new URLSearchParams(data.url.split('?')[1] || '').get('type') === 'reset') {
+        const rawQ = data.url.split('?')[1] || '';
+        const uRaw = rawQ.split('&').find(p => p.startsWith('u='))?.slice(2) || '';
+        if (uRaw) { await processResetVerify('reset?u=' + uRaw); } else { setForceForgotPassword(true); setAuthLoading(false); }
+        return;
+      }
       else {
         if (dispatchUniversalUrl(data.url)) return;
         const params = new URLSearchParams(data.url?.split('?')[1] || '');
@@ -3222,10 +3403,13 @@ export default function GolfHandicapApp() {
         if (urlParams.get('error') || hashParams.get('error')) {
           const currentPath = window.location.pathname;
           window.history.replaceState(null, '', '/');
-          const isReset = currentPath === '/reset-link' || urlParams.get('ltype') === 'reset';
-          if (isReset) { setLinkError(true); } else { setResendVerify(true); }
-          setAuthLoading(false);
-          return;
+          if (!window.Capacitor?.isNativePlatform?.() && /iphone|ipad|ipod/i.test(navigator.userAgent)) { window.location.href = 'dtmhandicap://error'; return; }
+          if (currentPath === '/reset-link') { clearResetMarkers(); setForceForgotPassword(true); } else { setResendVerify(true); }
+          setAuthLoading(false); return;
+        }
+        if (urlParams.get('show') === 'forgot') {
+          window.history.replaceState(null, '', '/');
+          setForceForgotPassword(true); setAuthLoading(false); return;
         }
         const screenParam = urlParams.get('screen');
         if ((screenParam === 'login' || window.location.pathname === '/login') && !urlParams.get('code') && !window.location.hash.includes('type=recovery')) {
@@ -3260,7 +3444,7 @@ export default function GolfHandicapApp() {
               const profile = await profRes.json();
               if (profRes.ok && profile?.name && !profile.subscribed) {
                 const isLapsed = !!profile.stripe_customer_id;
-                const endpoint = isLapsed ? `${API_BASE}/api/create-checkout-session-2` : `${API_BASE}/api/create-checkout-session`;
+                const endpoint = `${API_BASE}/api/create-checkout-session`;
                 const body = isLapsed
                   ? { email: profile.email || savedSession.user.email, userId: savedSession.user.id, reactivation: true }
                   : { email: profile.email || savedSession.user.email, userId: savedSession.user.id };
@@ -3288,12 +3472,17 @@ export default function GolfHandicapApp() {
             if (profRes.ok && profile?.name) {
               const newUser = { id: savedSession.user.id, name: profile.name, lastName: profile.last_name || '', email: profile.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: true, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null };
               setAuthUser(newUser);
-              if (!window.Capacitor?.isNativePlatform?.() && /iPhone|iPad|iPod/.test(navigator.userAgent)) setReactivationReturn(true);
+              if (!window.Capacitor?.isNativePlatform?.() && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
+                window.location.href = 'dtmhandicap://payment/reactivated'; return;
+              }
+              if (!window.Capacitor?.isNativePlatform?.()) setReactivationReturn(true);
               setAuthLoading(false);
               return;
             }
           }
-          if (!window.Capacitor?.isNativePlatform?.()) setReactivationReturn(true);
+          if (!window.Capacitor?.isNativePlatform?.() && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
+            window.location.href = 'dtmhandicap://payment/reactivated'; return;
+          }
           setAuthLoading(false);
           return;
         }
@@ -3353,6 +3542,31 @@ export default function GolfHandicapApp() {
           setAuthLoading(false);
           return;
         }
+        if (window.location.pathname === '/reset-link' && urlParams.get('u')) {
+          window.history.replaceState(null, '', '/');
+          try {
+            const su = decodeURIComponent(urlParams.get('u'));
+            const tok = new URL(su).searchParams.get('token');
+            if (!tok) throw new Error('no token');
+            const vr = await fetch('/api/verify-reset', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: tok })
+            });
+            const vd = await vr.json();
+            if (vr.ok && vd.access_token) {
+              sessionStorage.setItem('dtm-reset-token', vd.access_token);
+              clearResetMarkers();
+              setLinkError(false); setResendVerify(false);
+              setResetToken(vd.access_token); setAuthLoading(false);
+            } else {
+              setForceForgotPassword(true); setAuthLoading(false);
+            }
+          } catch(e) {
+            setForceForgotPassword(true); setAuthLoading(false);
+          }
+          return;
+        }
         const code = urlParams.get('code');
         if (code) {
           // Exchange code for session
@@ -3365,21 +3579,23 @@ export default function GolfHandicapApp() {
           if (exchangeRes.ok && exchangeData?.access_token) {
             const accessToken = exchangeData.access_token;
             const userData = exchangeData.user;
+            if (window.location.pathname === '/reset-link' || urlParams.get('source') === 'reset') {
+              window.history.replaceState(null, '', window.location.pathname);
+              setLinkError(false); setResendVerify(false); setResetToken(accessToken); setAuthLoading(false); return;
+            }
             const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userData.id}&select=*`, {
               headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/vnd.pgrst.object+json' }
             });
             const profile = await profRes.json();
             window.history.replaceState(null, '', window.location.pathname);
-            // Save session with refresh_token so retries work past the 1-hour access token expiry
-            const session = { access_token: accessToken, refresh_token: exchangeData.refresh_token || null, expires_at: exchangeData.expires_in ? Math.floor(Date.now()/1000) + exchangeData.expires_in : null, user: userData };
-            localStorage.setItem('sb-session', JSON.stringify(session));
             if (profRes.ok && profile?.name && profile.subscribed) {
-              // Already paid — go straight to app
-              const pendingUser = { id: userData.id, name: profile.name || userData.raw_user_meta_data?.name || '', lastName: profile.last_name || userData.raw_user_meta_data?.last_name || '', email: profile.email || userData.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: profile.subscribed || false, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null };
+              const welcomeU = { id: userData.id, name: profile.name || userData.raw_user_meta_data?.name || '', lastName: profile.last_name || userData.raw_user_meta_data?.last_name || '', email: profile.email || userData.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: true, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null };
+              setWelcomeUser(welcomeU);
               setAuthLoading(false);
-              setVerifiedUser(pendingUser);
               return;
             }
+            const session = { access_token: accessToken, refresh_token: exchangeData.refresh_token || null, expires_at: exchangeData.expires_in ? Math.floor(Date.now()/1000) + exchangeData.expires_in : null, user: userData };
+            localStorage.setItem('sb-session', JSON.stringify(session));
             setAuthUser({ id: userData.id, name: profile.name || userData.raw_user_meta_data?.name || '', lastName: profile.last_name || userData.raw_user_meta_data?.last_name || '', email: profile.email || userData.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: false, subscriptionRenewsAt: null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null });
             setAuthLoading(false);
             return;
@@ -3396,12 +3612,18 @@ export default function GolfHandicapApp() {
           const type = params.get('type');
           if (accessToken && type === 'recovery') {
             window.history.replaceState(null, '', window.location.pathname);
+            if (!window.Capacitor?.isNativePlatform?.() && /iphone|ipad|ipod/i.test(navigator.userAgent)) { window.location.href = 'dtmhandicap://login?source=reset#access_token=' + accessToken + '&refresh_token=' + (refreshToken || '') + '&type=recovery'; }
             sessionStorage.setItem('dtm-reset-token', accessToken);
+            Preferences.set({ key: 'dtm-pw-reset-at', value: String(Date.now()) }).catch(() => {});
+            setLinkError(false);
+            setResendVerify(false);
             setAuthLoading(false);
             setResetToken(accessToken);
             return;
           }
           if (accessToken && (type === 'signup' || type === 'email' || type === 'magiclink')) {
+            window.history.replaceState(null, '', window.location.pathname);
+            if (!window.Capacitor?.isNativePlatform?.() && /iphone|ipad|ipod/i.test(navigator.userAgent)) { window.location.href = 'dtmhandicap://login#access_token=' + accessToken + '&refresh_token=' + (refreshToken || '') + '&type=' + type; return; }
             // Fetch user info and profile with this token
             const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
               headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${accessToken}` }
@@ -3420,17 +3642,17 @@ export default function GolfHandicapApp() {
                 if (profRes.ok) { profile = await profRes.json(); break; }
               }
               if (profile) {
-                const session = { access_token: accessToken, user: userData };
-                localStorage.setItem('sb-session', JSON.stringify(session));
                 window.history.replaceState(null, '', window.location.pathname);
+                const userObj = { id: userData.id, name: profile.name || userData.raw_user_meta_data?.name || '', lastName: profile.last_name || userData.raw_user_meta_data?.last_name || '', email: profile.email || userData.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: profile.subscribed || false, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null };
                 if (!profile.subscribed) {
-                  setAuthUser({ id: userData.id, name: profile.name || userData.raw_user_meta_data?.name || '', lastName: profile.last_name || userData.raw_user_meta_data?.last_name || '', email: profile.email || userData.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: false, subscriptionRenewsAt: null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null });
+                  const session = { access_token: accessToken, user: userData };
+                  localStorage.setItem('sb-session', JSON.stringify(session));
+                  setAuthUser(userObj);
                   setAuthLoading(false);
                   return;
                 }
-                const pendingUser = { id: userData.id, name: profile.name || userData.raw_user_meta_data?.name || '', lastName: profile.last_name || userData.raw_user_meta_data?.last_name || '', email: profile.email || userData.email, memberNumber: profile.member_number, createdAt: profile.created_at, subscribed: profile.subscribed || false, subscriptionRenewsAt: profile.subscription_renews_at || null, stripeCustomerId: profile.stripe_customer_id || null, paymentProvider: profile.payment_provider || null };
+                setWelcomeUser(userObj);
                 setAuthLoading(false);
-                setVerifiedUser(pendingUser);
                 return;
               }
             }
@@ -3525,7 +3747,9 @@ export default function GolfHandicapApp() {
   if (authLoading) return (
     <div style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',display:'flex',alignItems:'center',justifyContent:'center'}}>
       <style>{globalStyles}</style>
-      <div style={{width:36,height:36,border:'3px solid rgba(232,184,75,0.2)',borderTopColor:'#e8b84b',borderRadius:'50%',animation:'dtm-spin 0.8s linear infinite'}} />
+      {(!window.Capacitor?.isNativePlatform?.() && /iphone|ipad|ipod/i.test(navigator.userAgent)) ? null : (
+        <div style={{width:36,height:36,border:'3px solid rgba(232,184,75,0.2)',borderTopColor:'#e8b84b',borderRadius:'50%',animation:'dtm-spin 0.8s linear infinite'}} />
+      )}
     </div>
   );
   if (exchangeError) return (
@@ -3536,17 +3760,8 @@ export default function GolfHandicapApp() {
       <button onClick={()=>setExchangeError(null)} style={{background:'none',border:'1px solid rgba(245,240,232,0.2)',borderRadius:4,color:'rgba(245,240,232,0.5)',fontSize:12,letterSpacing:2,textTransform:'uppercase',padding:'12px 24px',cursor:'pointer'}}>Dismiss</button>
     </div>
   );
-  if (resendVerify) return <ResendVerifyScreen />;
-  if (linkError) return (
-    <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
-      <style>{globalStyles}</style>
-      <AppHeader />
-      <div style={{padding:'4px 24px 0',textAlign:'center'}}>
-        <p style={{color:'#e8b84b',fontSize:15,fontWeight:700,lineHeight:1.75,textAlign:'center',margin:0}}>This reset link has already been used.<br/>Please request a new one.</p>
-      </div>
-    </div>
-  );
 
+  if (resendVerify) return <ResendVerifyScreen onDismiss={() => { setResendVerify(false); setForceLogin(true); }} />;
   if (welcomeUser) return (
     <div className="dtm-app-frame" style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',flexDirection:'column'}}>
       <style>{globalStyles}</style>
@@ -3561,7 +3776,7 @@ export default function GolfHandicapApp() {
             <div style={{fontSize:28,fontWeight:900,color:'#e8b84b',letterSpacing:2}}>{welcomeUser.memberNumber}</div>
           </div>
           <p style={{margin:0,marginTop:3,fontSize:14.5,color:'rgba(245,240,232,0.9)',lineHeight:1.75,fontWeight:400}}>
-            <span style={{color:'#e8b84b',fontWeight:700}}>Note:</span> As a first time user, you're encouraged to post as many of your prior rounds as you'd like, up to 18 months back. Doing so will provide our model with as much data as possible — enabling us to deliver you an accurate handicap as soon as possible.
+            <span style={{color:'#e8b84b',fontWeight:700}}>Note:</span> As a first time user, you're encouraged to post as many of your prior rounds as you'd like — up to 18 months back. Doing so will provide our model with as much data as possible, enabling us to deliver you an accurate handicap as soon as possible.
           </p>
           <button className="auth-btn-primary" style={{width:'100%',padding:16,background:'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:3,color:'#0d1b2e',fontSize:13,fontWeight:900,letterSpacing:4,textTransform:'uppercase',cursor:'pointer',marginTop:13}} onClick={()=>{
             setPreFillMemberNumber(welcomeUser.memberNumber);
@@ -3575,7 +3790,7 @@ export default function GolfHandicapApp() {
       </div>
     </div>
   );
-  if (!authUser) return <AuthScreen onAuth={setAuthUser} verifiedEmail={verifiedEmail} verifiedUser={verifiedUser} resetToken={resetToken} forceLogin={forceLogin} onForceLoginClear={() => setForceLogin(false)} forceSignup={forceSignup} onForceSignupClear={() => setForceSignup(false)} onResetComplete={() => { sessionStorage.removeItem('dtm-reset-token'); setResetToken(null); }} fromEmailLink={fromEmailLink} onEmailLinkClear={() => setFromEmailLink(false)} onShowAppBanner={() => setFromEmailLink(true)} reactivationReturn={reactivationReturn} onReactivationDismiss={() => setReactivationReturn(false)} preFillMemberNumber={preFillMemberNumber} preFillNonce={preFillNonce} />;
+  if (!authUser) return <AuthScreen onAuth={setAuthUser} verifiedEmail={verifiedEmail} verifiedUser={verifiedUser} resetToken={resetToken} forceLogin={forceLogin} onForceLoginClear={() => setForceLogin(false)} forceSignup={forceSignup} onForceSignupClear={() => setForceSignup(false)} onResetComplete={() => { sessionStorage.removeItem('dtm-reset-token'); setResetToken(null); clearResetMarkers(); }} reactivationReturn={reactivationReturn} onReactivationDismiss={() => setReactivationReturn(false)} preFillMemberNumber={preFillMemberNumber} preFillNonce={preFillNonce} forceForgotPassword={forceForgotPassword} onForceForgotPasswordClear={() => setForceForgotPassword(false)} />;
   // SUBSCRIPTION GATE — re-enabled for live payments.
   if (!authUser.subscribed) return (
     <div style={{maxWidth:430,margin:'0 auto',minHeight:'100dvh',background:'#0d1b2e',color:'#f5f0e8',display:'flex',alignItems:'center',justifyContent:'center'}}>
@@ -3587,23 +3802,6 @@ export default function GolfHandicapApp() {
     <>
       <AppContent user={authUser} onSignOut={handleSignOut} onAccountDeleted={handleAccountDeleted} onUserUpdate={u => setAuthUser(u)} />
       <Analytics />
-      {reactivationReturn && (
-        <div style={{position:'fixed',inset:0,zIndex:999,display:'flex',flexDirection:'column',justifyContent:'flex-end'}}>
-          <div style={{position:'absolute',inset:0,background:'rgba(5,12,25,0.72)'}} onClick={()=>setReactivationReturn(false)} />
-          <div style={{position:'relative',background:'#0d1b2e',borderTop:'1px solid rgba(232,184,75,0.25)',borderRadius:'16px 16px 0 0',padding:'28px 24px calc(36px + env(safe-area-inset-bottom))'}}>
-            <div style={{width:36,height:3,background:'rgba(245,240,232,0.15)',borderRadius:2,margin:'0 auto 24px'}} />
-            <div style={{fontSize:9,letterSpacing:3,textTransform:'uppercase',color:'rgba(245,240,232,0.35)',textAlign:'center',marginBottom:10}}>Down The Middle</div>
-            <div style={{fontSize:16,fontWeight:700,color:'#f5f0e8',textAlign:'center',marginBottom:20,letterSpacing:0.5}}>Your membership is now active</div>
-            <button onClick={()=>{ window.location.href='dtmhandicap://payment/reactivated'; }} style={{width:'100%',padding:14,background:'linear-gradient(135deg,#e8b84b,#c49a30)',border:'none',borderRadius:4,color:'#0d1b2e',fontSize:12,fontWeight:900,letterSpacing:3,textTransform:'uppercase',cursor:'pointer'}}>Open the App</button>
-            <div style={{display:'flex',alignItems:'center',gap:12,margin:'16px 0'}}>
-              <div style={{flex:1,height:1,background:'rgba(245,240,232,0.1)'}} />
-              <span style={{fontSize:11,color:'rgba(245,240,232,0.3)',letterSpacing:1}}>or</span>
-              <div style={{flex:1,height:1,background:'rgba(245,240,232,0.1)'}} />
-            </div>
-            <button onClick={()=>setReactivationReturn(false)} style={{width:'100%',padding:14,background:'none',border:'1px solid rgba(245,240,232,0.12)',borderRadius:4,color:'rgba(245,240,232,0.45)',fontSize:12,fontWeight:700,letterSpacing:2,textTransform:'uppercase',cursor:'pointer'}}>Continue in Browser</button>
-          </div>
-        </div>
-      )}
     </>
   );
 }

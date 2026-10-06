@@ -17,15 +17,23 @@ const headerHtml = `
     <h1 style="color:#f5f0e8;font-size:20px;font-weight:900;letter-spacing:3.75px;text-transform:uppercase;margin:0;font-family:Verdana,Geneva,sans-serif;">DOWN THE MIDDLE</h1>
     <p style="color:#e02247;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin:4px 0 0;font-family:Verdana,Geneva,sans-serif;padding-right:4px;">A TRUER GOLF HANDICAP</p>
   </div>
-  <div style="height:1px;background:#e8b84b;margin:0 0 20px;"></div>
+  <div style="height:1px;background:#e8b84b;margin:0 auto 20px;max-width:330px;"></div>
 `;
 
-const wrapHtml = (content) => `
+const wrapHtml = (content) => `<!DOCTYPE html>
+<html lang="en" style="color-scheme:light;">
+<head>
+  <meta charset="UTF-8">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
+</head>
+<body style="margin:0;padding:0;background-color:#0d1b2e;">
   <div style="background-color:#0d1b2e;padding:40px 20px;font-family:system-ui,-apple-system,Verdana,sans-serif;max-width:480px;margin:0 auto;border-radius:8px;">
     ${headerHtml}
     ${content}
   </div>
-`;
+</body>
+</html>`;
 
 const loginLink = `<a href="https://app.dtmhandicap.com/open.html" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a>`;
 const loginText = `<p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:36px 0 0;">Log in ${loginLink}</p>`;
@@ -51,21 +59,21 @@ export default async function handler(req, res) {
           <span style="color:#e8b84b;font-size:24px;font-weight:900;letter-spacing:4px;text-decoration:none !important;pointer-events:none;font-family:system-ui,-apple-system,sans-serif;">${memberNumber.replace('-', '-\u200B')}</span>
         </div>
       </div>
-      <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:36px 0 0;">Log in <a href="https://euwqnyzzrxrmldmfspjr.supabase.co/functions/v1/open-app?memberNumber=${encodeURIComponent(memberNumber)}" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a></p>
+      <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:36px 0 0;">Log in <a href="https://app.dtmhandicap.com/open.html?memberNumber=${encodeURIComponent(memberNumber)}" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a></p>
     `);
 
   } else if (type === 'resend_verify') {
     const linkRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}` },
-      body: JSON.stringify({ type: 'magiclink', email, options: { redirect_to: 'https://app.dtmhandicap.com/login' } }),
+      body: JSON.stringify({ type: 'magiclink', email, options: { redirect_to: 'dtmhandicap://login' } }),
     });
     const linkData = await linkRes.json();
     const url = linkData.action_link || linkData.data?.action_link;
     if (!url) return res.status(200).json({ success: true }); // don't reveal if email not found
-    subject = 'Continue Verification';
+    subject = 'Complete Your New Membership';
     html = wrapHtml(`
-      <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0 0 24px;text-align:center;">Click the link below to continue your sign up:</p>
+      <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0 0 24px;text-align:center;">Click the link below to continue where you left off.</p>
       <div style="text-align:center;margin:0 0 8px;">
         <a href="${url}" style="background:#e8b84b;color:#0d1b2e;font-size:12px;font-weight:900;letter-spacing:3px;text-transform:uppercase;padding:14px 32px;border-radius:4px;text-decoration:none;display:inline-block;font-family:Verdana,Geneva,sans-serif;">CONTINUE</a>
       </div>
@@ -82,7 +90,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         type: 'recovery',
         email,
-        options: { redirect_to: 'https://app.dtmhandicap.com/reset-link' },
+        options: { redirect_to: 'dtmhandicap://login?source=reset' },
       }),
     });
     const linkData = await linkRes.json();
@@ -90,9 +98,9 @@ export default async function handler(req, res) {
     if (!url) return res.status(500).json({ error: 'Could not generate reset link', detail: linkData });
     subject = 'Password Reset Link';
     html = wrapHtml(`
-      <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0 0 24px;text-align:center;">Click the link below to reset your password:</p>
+      <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0 0 24px;text-align:center;">Click the link below to reset your password.</p>
       <div style="text-align:center;margin:0 0 8px;">
-        <a href="${url}" style="background:#e8b84b;color:#0d1b2e;font-size:12px;font-weight:900;letter-spacing:3px;text-transform:uppercase;padding:14px 32px;border-radius:4px;text-decoration:none;display:inline-block;font-family:Verdana,Geneva,sans-serif;">RESET PASSWORD</a>
+        <a href="https://app.dtmhandicap.com/open.html?type=reset&u=${encodeURIComponent(url)}" style="background:#e8b84b;color:#0d1b2e;font-size:12px;font-weight:900;letter-spacing:3px;text-transform:uppercase;padding:14px 32px;border-radius:4px;text-decoration:none;display:inline-block;font-family:Verdana,Geneva,sans-serif;">RESET PASSWORD</a>
       </div>
     `);
 
@@ -115,7 +123,7 @@ export default async function handler(req, res) {
     html = wrapHtml(`
       <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0 0 4px;text-align:center;word-break:break-word;">${requesterName} has requested</p>
       <p style="color:#ffffff;font-size:13px;font-weight:400;line-height:1.8;margin:0;text-align:center;word-break:break-word;">to add you as a Playing Partner.</p>
-      <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:28px 0 0;">Log in and accept <a href="https://euwqnyzzrxrmldmfspjr.supabase.co/functions/v1/open-app?screen=login" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a></p>
+      <p style="color:rgba(245,240,232,0.6);font-size:13px;text-align:center;margin:28px 0 0;">Log in and accept <a href="https://app.dtmhandicap.com/open.html?screen=login" style="color:#e8b84b;text-decoration:underline;font-weight:400;">here</a></p>
     `);
 
   } else if (type === 'account_deleted') {

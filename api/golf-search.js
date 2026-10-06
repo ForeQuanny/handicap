@@ -30,7 +30,14 @@ export default async function handler(req, res) {
     if (action === 'search') {
       if (!query || query.length < 2) return res.status(400).json({ error: 'Query too short' });
 
-      // Check Supabase cache first
+      // Always fetch manual courses matching the query
+      const manualRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/courses?name=ilike.*${encodeURIComponent(query)}*&source=eq.manual&select=id,name,location,source,golfapi_id,tees(id,name,rating,slope)&order=name.asc`,
+        { headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } }
+      );
+      const manualCourses = manualRes.ok ? await manualRes.json() : [];
+
+      // Check Supabase cache
       const cacheRes = await fetch(
         `${SUPABASE_URL}/rest/v1/courses?name=ilike.*${encodeURIComponent(query)}*&select=id,name,location,source,golfapi_id,tees(id,name,rating,slope)&order=name.asc&limit=8`,
         { headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } }
@@ -46,18 +53,28 @@ export default async function handler(req, res) {
         { headers: { Authorization: `Bearer ${GOLF_API_KEY}` } }
       );
       const apiData = await apiRes.json();
-      if (!apiRes.ok) return res.status(500).json({ error: 'GolfAPI search failed' });
+      if (!apiRes.ok) {
+        // If GolfAPI fails but we have manual courses, return those
+        if (manualCourses.length > 0) return res.status(200).json({ results: manualCourses, source: 'cache' });
+        return res.status(500).json({ error: 'GolfAPI search failed' });
+      }
 
       const clubs = apiData.clubs || [];
-      return res.status(200).json({
-        results: clubs.slice(0, 8).map(c => ({
-          golfapi_club_id: c.clubID,
-          name: c.clubName,
-          location: [c.city, c.state].filter(Boolean).join(', '),
-          source: 'golfapi',
-          courses: (c.courses || []).map(co => ({ courseID: co.courseID, courseName: co.courseName })),
-        })),
+      const golfApiResults = clubs.slice(0, 8).map(c => ({
+        golfapi_club_id: c.clubID,
+        name: c.clubName,
+        location: [c.city, c.state].filter(Boolean).join(', '),
         source: 'golfapi',
+        courses: (c.courses || []).map(co => ({ courseID: co.courseID, courseName: co.courseName })),
+      }));
+
+      // Prepend manual courses, removing any GolfAPI duplicates by name
+      const manualNames = new Set(manualCourses.map(c => c.name.toLowerCase()));
+      const deduped = golfApiResults.filter(c => !manualNames.has(c.name.toLowerCase()));
+      const combined = [...manualCourses, ...deduped].slice(0, 8);
+      return res.status(200).json({
+        results: combined,
+        source: manualCourses.length > 0 ? 'mixed' : 'golfapi',
         apiRequestsLeft: apiData.apiRequestsLeft,
       });
     }
